@@ -9,13 +9,14 @@ high binary and wall-clock-execution time cost.
 
 ## Use the Least Derived Interface for common calls
 
-Consider [https://learn.microsoft.com/uwp/api/windows.data.json.jsonobject](the
-`Windows.Data.Json.JsonObject` type.) It is a composite of multiple interfaces –
-`IJsonObject` (the default), `IInspectable` (inherited), `IJsonValue`,
-`IMap<String, IJsonValue>`, `IIterable<IKeyValuePair<String, IJsonValue>>`,
-IIterable<IKeyValuePair<String, IJsonValue>>, and IStringable. Using any method
-outside of JsonObject (IJsonObject) requires a QueryInterface to the target
-interface. Consider this normal-looking code:
+Consider
+[the `Windows.Data.Json.JsonObject` type.](https://learn.microsoft.com/uwp/api/windows.data.json.jsonobject)
+It is a composite of multiple interfaces – `IJsonObject` (the default),
+`IInspectable` (inherited), `IJsonValue`, `IMap<String, IJsonValue>`,
+`IIterable<IKeyValuePair<String, IJsonValue>>`, IIterable<IKeyValuePair<String,
+IJsonValue>>, and IStringable. Using any method outside of JsonObject
+(IJsonObject) requires a QueryInterface to the target interface. Consider this
+normal-looking code:
 
 ```c++
 ValueSet v;

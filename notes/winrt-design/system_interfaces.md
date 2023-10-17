@@ -10,8 +10,8 @@ WinRT and used more efficiently.
 These APIs were originally designed on top of the shell data model as a way to
 grant standardized access to brokered applications and features that needed to
 hop from a low-IL environment to the medium-IL user data environment of Windows.
-Whenever possible, **do not use** these APIs in your application. Instead, use the
-C++ equivalent or use the Win32 flat ABI instead.
+Whenever possible, **do not use** these APIs in your application. Instead, use
+the C++ equivalent or use the Win32 flat ABI instead.
 
 If you...
 

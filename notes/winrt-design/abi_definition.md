@@ -38,15 +38,15 @@ Devirtualization and link-time-code-generation are generally defeated when using
 WinRT interfaces – even inside a single library.
 
 Language runtime features – like collections – are orders of magnitude faster
-than using the equivalent WinRT interfaces. Compare `std::map<std::wstring,
-std::wstring>::emplace_back` with `IMap<String, String>::Insert`. The optimizer is
-able to directly splat the code for "emplace back" inline with the caller,
-occasionally doing in-place-construction of the map slot key/value pair from an
-inbound property.
+than using the equivalent WinRT interfaces. Compare
+`std::map<std::wstring, std::wstring>::emplace_back` with
+`IMap<String, String>::Insert`. The optimizer is able to directly splat the code
+for "emplace back" inline with the caller, occasionally doing
+in-place-construction of the map slot key/value pair from an inbound property.
 
-Access patterns are similarly concerning – `std::find(v.begin(), v.end(),
-someValue)` is a linear scan of an array compiled down to a very tight set of
-register incrementation and comparison calls. Using
+Access patterns are similarly concerning –
+`std::find(v.begin(), v.end(), someValue)` is a linear scan of an array compiled
+down to a very tight set of register incrementation and comparison calls. Using
 `IVector<SomeWinRTValue>::IndexOf` for most collections only does
 instance-finding, not semantic "is this value in the collection" lookup.
 
@@ -68,10 +68,15 @@ support.
 
 Languages like C++ strive for "zero overhead abstraction." Exampes include:
 
--   Lifecycle – use `std::unique_ptr<>` and `std::shared_ptr<>` and `std::weak_ptr<>`
--   Coroutines – use [https://github.com/microsoft/wil/blob/master/include/wil/coroutine.h](wil::com_task) or [https://github.com/microsoft/cpp-async](async::task), or use [https://learn.microsoft.com/cpp/standard-library/future-class](std::future) (in
-    preference order, for building with Windows)
--   Locking – use `std::mutex` (critical section) or `std::shared_mutex` (srwlock)
+-   Lifecycle – use `std::unique_ptr<>` and `std::shared_ptr<>` and
+    `std::weak_ptr<>`
+-   Coroutines – use
+    [wil::com_task](https://github.com/microsoft/wil/blob/master/include/wil/coroutine.h)
+    or [async::task](https://github.com/microsoft/cpp-async), or use
+    [std::future](https://learn.microsoft.com/cpp/standard-library/future-class)
+    (in preference order, for building with Windows)
+-   Locking – use `std::mutex` (critical section) or `std::shared_mutex`
+    (srwlock)
 -   Strings – use `std::wstring`, `std::wstring_view`, `std::string`,
     `std::string_view`, `wil::zstring_view`
 -   Collections – use any of the std types (vectors, maps, lists, sets, etc.)

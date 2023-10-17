@@ -1,6 +1,6 @@
 # Strong Typing is Always Preferable
 
-While it’s attractive to use a "property bag" of typed values to avoid WinRT IDL
+While it's attractive to use a "property bag" of typed values to avoid WinRT IDL
 definition & implementation costs, the end-to-end cost of defining a
 property-bag data-schema-contract is much higher than just providing strongly
 typed things.
@@ -74,7 +74,7 @@ runtimeclass DataPoint {
 }
 ```
 
-The weakly-typed system does not define separate types for Car and Boat. It’s
+The weakly-typed system does not define separate types for Car and Boat. It's
 just expected that if the Kind is Boat, you know what properties are available
 to you. So it looks like this:
 
@@ -116,10 +116,10 @@ the implementation.
 
 The usual argument is that defining property bags is "easier" earlier in the
 design cycle. No need to specify the name in the IDL, or choose a type! Adding a
-new property is as easy as `ValueSet::Insert(...,
-PropertyValue::CreateInt32(...))`! It’s faster to compile as well, since adding
-a new property is just adding a string; changing the type just means changing
-two places (the add & retrieval steps.)
+new property is as easy as
+`ValueSet::Insert(..., PropertyValue::CreateInt32(...))`! It's faster to compile
+as well, since adding a new property is just adding a string; changing the type
+just means changing two places (the add & retrieval steps.)
 
 The downstream cost of that argument is huge.
 
