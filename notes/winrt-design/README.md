@@ -19,4 +19,4 @@ the MIDL3 interface definition language.
 * [./async_is_hazardous.md](Async APIs are Challenging)
 * [./system_interfaces.md](Prefer your runtime's support libraries over WinRT)
 * [./build_binaries_well.md](Use the right compiler & linker switches for best results)
-* 
+* [./strong_vs_weak_typing.md](Strong typing and property bags)
