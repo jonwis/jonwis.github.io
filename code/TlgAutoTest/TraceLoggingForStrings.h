@@ -4,9 +4,9 @@
 #include <string_view>
 #include <winrt/base.h>
 
-template<typename TView> struct _tlgWrapperForStringView
+template<typename TString> struct _tlgWrapperForStdString
 {
-    TView const& m_view;
+    TString const& m_view;
 
     static const unsigned DataDescCount = 2;
 
@@ -18,49 +18,30 @@ template<typename TView> struct _tlgWrapperForStringView
     }
 };
 
-TLG_INLINE auto _tlg_CALL _tlgWrapAuto(std::wstring_view const& v)
-{
-    return _tlgWrapperForStringView<std::wstring_view>{ v };
-}
+template<class Elem, class Traits> TLG_INLINE auto _tlg_CALL _tlgWrapAuto(std::basic_string_view<Elem, Traits> const& v) { return _tlgWrapperForStdString<std::basic_string_view<Elem, Traits>>{ v }; }
+template<class Elem, class Traits, class Alloc> TLG_INLINE auto _tlg_CALL _tlgWrapAuto(std::basic_string<Elem, Traits, Alloc> const& v) { return _tlgWrapperForStdString<std::basic_string<Elem, Traits, Alloc>>{ v }; }
 
-template<> struct _tlgTypeMapBase<std::wstring_view>
+template<class Elem> struct _tlgTypeMapStringBase
 {
     typedef uint8_t _tlgTypeType0; /* No field tags: Don't need to store outtype. */
     typedef uint16_t _tlgTypeType1; /* Yes field tags: Need to store outtype = 0. */
     static bool const _tlgIsSimple = true;
-    static _tlgTypeType0 const _tlgType0 = TlgInCOUNTEDSTRING | 0x0000;
-    static _tlgTypeType1 const _tlgType1 = TlgInCOUNTEDSTRING | 0x8080;
+    static auto const _tlgBaseType = std::is_same_v<Elem, wchar_t> ? TlgInCOUNTEDSTRING : TlgInCOUNTEDANSISTRING;
+    static _tlgTypeType0 const _tlgType0 = _tlgBaseType | 0x0000;
+    static _tlgTypeType1 const _tlgType1 = _tlgBaseType | 0x8080;
 };
 
-TLG_INLINE auto _tlg_CALL _tlgWrapAuto(std::string_view const& v)
-{
-    return _tlgWrapperForStringView<std::string_view>{ v };
-}
-
-template<> struct _tlgTypeMapBase<std::string_view>
-{
-    typedef uint8_t _tlgTypeType0; /* No field tags: Don't need to store outtype. */
-    typedef uint16_t _tlgTypeType1; /* Yes field tags: Need to store outtype = 0. */
-    static bool const _tlgIsSimple = true;
-    static _tlgTypeType0 const _tlgType0 = TlgInCOUNTEDANSISTRING | 0x0000;
-    static _tlgTypeType1 const _tlgType1 = TlgInCOUNTEDANSISTRING | 0x8080;
-};
+template<class Elem, class Traits> struct _tlgTypeMapBase<std::basic_string_view<Elem, Traits>> : _tlgTypeMapStringBase<Elem> {};
+template<class Elem, class Traits, class Alloc> struct _tlgTypeMapBase<std::basic_string<Elem, Traits, Alloc>> : _tlgTypeMapStringBase<Elem> {};
 
 #define TraceLoggingStringView(val, ...) _tlgArgAuto(val, __VA_ARGS__)
 
 TLG_INLINE auto _tlg_CALL _tlgWrapAuto(winrt::hstring const& v)
 {
-    return _tlgWrapperForStringView<std::wstring_view>{ v };
+    return _tlgWrapperForStdString<std::wstring_view>{ v };
 }
 
-template<> struct _tlgTypeMapBase<winrt::hstring>
-{
-    typedef uint8_t _tlgTypeType0; /* No field tags: Don't need to store outtype. */
-    typedef uint16_t _tlgTypeType1; /* Yes field tags: Need to store outtype = 0. */
-    static bool const _tlgIsSimple = true;
-    static _tlgTypeType0 const _tlgType0 = TlgInCOUNTEDSTRING | 0x0000;
-    static _tlgTypeType1 const _tlgType1 = TlgInCOUNTEDSTRING | 0x8080;
-};
+template<> struct _tlgTypeMapBase<winrt::hstring> : _tlgTypeMapStringBase<wchar_t> {};
 
 #define TraceLoggingHString(val, ...) _tlgArgAuto(val, __VA_ARGS__)
 

@@ -22,10 +22,14 @@ int main()
     std::wstring_view v1{ L"string view 2" };
     std::string_view v2{ "narrow string view 3" };
     winrt::hstring h1{ L"hstring 1" };
+    std::wstring x{ L"teeeeeeeeext" };
+    std::wstring y{ L"mooooooo" };
     TraceLoggingWrite(g_hProvider, "KittensAndPuppies",
         TraceLoggingValue(v1, "foo"),
         TraceLoggingValue(v2, "zot"),
         TraceLoggingValue(h1, "bar"),
+        TraceLoggingValue(x),
+        TraceLoggingValue(y),
         TraceLoggingStringView(v1),
         TraceLoggingStringView(v2),
         TraceLoggingHString(h1));
