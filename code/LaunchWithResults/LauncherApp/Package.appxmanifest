@@ -8,14 +8,14 @@
   IgnorableNamespaces="uap rescap">
 
   <Identity
-    Name="d8216834-3ca8-454d-9d89-370b30ad71e4"
+    Name="08a69c4c-dbaa-449e-beb1-0ad6bbc563b4"
     Publisher="CN=jonwis"
     Version="1.0.0.0" />
 
-  <mp:PhoneIdentity PhoneProductId="d8216834-3ca8-454d-9d89-370b30ad71e4" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
+  <mp:PhoneIdentity PhoneProductId="08a69c4c-dbaa-449e-beb1-0ad6bbc563b4" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
-    <DisplayName>ResultsSourceApp</DisplayName>
+    <DisplayName>LauncherApp</DisplayName>
     <PublisherDisplayName>jonwis</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -34,21 +34,14 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="$targetentrypoint$">
       <uap:VisualElements
-        DisplayName="ResultsSourceApp"
-        Description="ResultsSourceApp"
+        DisplayName="LauncherApp"
+        Description="LauncherApp"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
         <uap:SplashScreen Image="Assets\SplashScreen.png" />
       </uap:VisualElements>
-        <Extensions>
-            <uap:Extension Category="windows.protocol">
-                <uap:Protocol Name="x-launch-results" ReturnResults="always">
-                    <uap:DisplayName>Results Source</uap:DisplayName>
-                </uap:Protocol>
-            </uap:Extension>
-        </Extensions>
     </Application>
   </Applications>
 
