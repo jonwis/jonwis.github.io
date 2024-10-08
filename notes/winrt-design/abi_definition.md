@@ -72,9 +72,8 @@ Languages like C++ strive for "zero overhead abstraction." Exampes include:
     `std::weak_ptr<>`
 -   Coroutines – use
     [wil::com_task](https://github.com/microsoft/wil/blob/master/include/wil/coroutine.h)
-    or [async::task](https://github.com/microsoft/cpp-async), or use
-    [std::future](https://learn.microsoft.com/cpp/standard-library/future-class)
-    (in preference order, for building with Windows)
+    or [async::task](https://github.com/microsoft/cpp-async) (in preference
+    order, for building with Windows)
 -   Locking – use `std::mutex` (critical section) or `std::shared_mutex`
     (srwlock)
 -   Strings – use `std::wstring`, `std::wstring_view`, `std::string`,
@@ -84,8 +83,8 @@ Languages like C++ strive for "zero overhead abstraction." Exampes include:
 ## Convert from WinRT to language types once
 
 When taking in WinRT objects from an ABI call (such as calling the platform, or
-being invoked by a caller) strive to convert those types to native language
-types at most once, at some form of demarcation line. Native types like
-std::wstring are much much more well optimized-for in the rest of the STL than
-operating on hstring directly – especially for producing new string values
-through concatenation, formatting, splitting, etc.
+being invoked by a caller) convert those types to native language types at most
+once, at some form of demarcation line. Native types like `std::wstring` are
+much much more well optimized-for in the rest of the STL than operating on
+hstring directly – especially for producing new string values through
+concatenation, formatting, splitting, etc.
