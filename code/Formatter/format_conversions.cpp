@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <format>
 #include <locale>
 #include <icu.h>
@@ -109,15 +109,17 @@ template<typename traits, typename allocator> struct std::formatter<std::basic_s
 
 int main()
 {
+#if FAILS_CONVERSION_STATE_NOT_SET_TO_CODEPAGE    
     std::print(std::cout, "{}, {}, {}, {}",
-        std::wstring_view{ L"woop" },
-        L"woop",
-        (wchar_t const*)L"woop",
-        std::wstring{ L"woop" });
+        std::wstring_view{ L"♻️" },
+        L"♻️",
+        (wchar_t const*)L"♻️",
+        std::wstring{ L"♻️" });
+#endif
 
     std::print(std::cout, "{:u}, {:u}, {:u}, {:u}",
-        std::wstring_view{ L"woop" },
-        L"woop",
-        (wchar_t const*)L"woop",
-        std::wstring{ L"woop" });
+        std::wstring_view{ L"♻️" },
+        L"♻️",
+        (wchar_t const*)L"♻️",
+        std::wstring{ L"♻️" });
 }

@@ -10,3 +10,7 @@ target_sources(CharacterFormatter
         format_conversions.cpp
 )
 
+target_compile_options(CharacterFormatter 
+    PRIVATE 
+        /source-charset:utf-8
+        /execution-charset:utf-8)
