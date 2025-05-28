@@ -1,4 +1,4 @@
-// ConsoleApplication1.cpp : This file contains the 'main' function. Program execution begins and ends there.
+// SampleObject.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
 #include <iostream>
 #include <atlbase.h>
@@ -23,6 +23,9 @@ class CMyWinRTComponent :
 public:
     virtual ~CMyWinRTComponent() = default;
 
+    // Because this object implements IMemoryBuffer and IMemoryBufferReference, both of which derive
+    // from IInspectable, we specify that requests for IInspectable follow the path through one or
+    // the other of their common ancestor. Doesn't matter which one, just has to be one of them.
     BEGIN_COM_MAP(CMyWinRTComponent)
         COM_INTERFACE_ENTRY(ABI::Windows::Foundation::IMemoryBuffer)
         COM_INTERFACE_ENTRY(ABI::Windows::Foundation::IMemoryBufferReference)
@@ -106,6 +109,9 @@ int main()
     TrustLevel tl;
     hr = component->QueryInterface(IID_PPV_ARGS(&inspectable));
     inspectable->GetTrustLevel(&tl);
+
+    CComPtr<ABI::Windows::Foundation::IMemoryBufferReference> memoryBufferReference2;
+    hr = inspectable->QueryInterface(IID_PPV_ARGS(&memoryBufferReference2));
 
     return 0;
 }
