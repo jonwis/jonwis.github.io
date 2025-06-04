@@ -4,6 +4,86 @@
 #include <icu.h>
 #include <array>
 
+struct uchar_iterator : UCharIterator
+{
+    using value_type = UChar32;
+    using difference_type = int32_t;
+    bool end_iterator_{ false };
+
+    uchar_iterator(std::string_view s)
+    {
+        uiter_setUTF8(this, s.data(), static_cast<int32_t>(s.size()));
+    }
+
+    uchar_iterator(std::wstring_view s)
+    {
+        uiter_setUTF16BE(this, reinterpret_cast<char const*>(s.data()), static_cast<int32_t>(s.size() * sizeof(wchar_t)));
+    }
+
+    struct end_tag {};
+
+    uchar_iterator(end_tag const) : end_iterator_(true)
+    {
+    }
+
+    UChar32 operator*() const
+    {
+        return uiter_current32(as_iter());
+    }
+
+    uchar_iterator& operator++()
+    {
+        if (uiter_next32(this) == U_SENTINEL)
+        {
+            end_iterator_ = true;
+        }
+        return *this;
+    }
+
+    uchar_iterator operator++(int)
+    {
+        uchar_iterator i = *this;
+        ++(*this);
+        return i;
+    }
+
+    bool operator==(uchar_iterator const& other) const
+    {
+        auto otherPtr = std::addressof(other);
+        if (this == otherPtr)
+        {
+            return true;
+        }
+        else if (end_iterator_ != other.end_iterator_)
+        {
+            return false;
+        }
+        else
+        {
+            return (this->context == other.context) &&
+                (this->index) == (other.index);
+        }
+    }
+
+    bool operator!=(uchar_iterator const& other) const
+    {
+        return !(*this == other);
+    }
+
+private:
+    int32_t position() const
+    {
+        auto self = as_iter();
+        return (*self->getIndex)(self, UITER_CURRENT);
+    }
+
+    UCharIterator* as_iter() const
+    {
+        return const_cast<UCharIterator*>(static_cast<UCharIterator const*>(this));
+    }
+};
+
+
 template<typename TTraits> struct std::formatter<std::basic_string_view<wchar_t, TTraits>, char>
 {
     struct convert_t : std::codecvt<wchar_t, char, std::mbstate_t>
@@ -107,6 +187,18 @@ template<std::size_t N> struct std::formatter<wchar_t[N], char> : std::formatter
 template<> struct std::formatter<wchar_t const*, char> : std::formatter<std::wstring_view, char> {};
 template<typename traits, typename allocator> struct std::formatter<std::basic_string<wchar_t, traits, allocator>> : std::formatter<std::basic_string_view<wchar_t>, char> {};
 
+struct uchar_range
+{
+    uchar_iterator begin_;
+
+    template<typename TString> uchar_range(TString&& view) : begin_(view)
+    {
+    }
+
+    uchar_iterator begin() { return begin_; };
+    uchar_iterator end() { return uchar_iterator(uchar_iterator::end_tag{}); }
+};
+
 int main()
 {
 #if FAILS_CONVERSION_STATE_NOT_SET_TO_CODEPAGE    
@@ -122,4 +214,28 @@ int main()
         L"♻️",
         (wchar_t const*)L"♻️",
         std::wstring{ L"♻️" });
+
+    std::wstring foo_wchar = L"this is some text";
+    std::string foo_char = "this is some text";
+
+    auto r1 = uchar_range(foo_char);
+    auto r2 = uchar_range(foo_wchar);
+
+    auto f = uchar_range(L"pups");
+    std::println(std::cout, "Len {}", std::distance(std::begin(f), std::end(f)));
+
+    for (auto ch : r1)
+    {
+        std::println(std::cout, "Char {:x} {:c}", ch, static_cast<char>(ch));
+    }
+
+    for (auto ch : r2)
+    {
+        std::println(std::cout, "Char {:x}", ch);
+    }
+
+    bool lxc = std::lexicographical_compare(std::begin(r1), std::end(r1), std::begin(r2), std::end(r2));
+    std::cout << std::boolalpha << lxc << std::endl;
+
+    std::cout << std::equal(std::begin(r1), std::end(r1), std::begin(r2)) << std::endl;
 }
