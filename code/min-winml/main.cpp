@@ -10,10 +10,11 @@
 #include <wrl/wrappers/corewrappers.h>
 
 // From WinAppSDK
+#define ORT_API_MANUAL_INIT 1
 #include <Microsoft.Windows.AI.MachineLearning.h>
 #include <WindowsAppSDK-VersionInfo.h>
-#include <onnxruntime/provider_options.h>
-#include <onnxruntime/win_onnxruntime_c_api.h>
+#include <win_onnxruntime_c_api.h>
+#include <win_onnxruntime_cxx_api.h>
 
 #include <wil/result_macros.h>
 #include <wil/resource.h>
@@ -42,6 +43,7 @@
 // Remove packages to try this out using some powershell:
 // get-appxpackage | ?{ $_.Dependencies -match "WindowsAppRuntime.1.8-experimental4" } |% PackageFullName | Remove-AppxPackage
 // get-appxpackage *WindowsAppRuntime.1.8-experimental4* | Remove-AppxPackage
+// get-appxpackage *WindowsMLRuntime* | Remove-AppxPackage
 //
 HRESULT AddWinAppSDKReference(PACKAGEDEPENDENCY_CONTEXT* context)
 {
@@ -127,7 +129,7 @@ HRESULT GetWinAppSDKReady(PACKAGEDEPENDENCY_CONTEXT* context)
     return S_OK;
 }
 
-HRESULT SetUpWinML(void const** ortApiBase)
+HRESULT SetUpWinML()
 {
     // Configure COM/WinRT runtime
     RETURN_IF_FAILED(::Windows::Foundation::Initialize(RO_INIT_MULTITHREADED));
@@ -137,6 +139,13 @@ HRESULT SetUpWinML(void const** ortApiBase)
     RETURN_IF_FAILED(GetWinAppSDKReady(&packageDependencyContext));
     RETURN_HR_IF(E_FAIL, !packageDependencyContext);
 
+    // Get the Onnx Runtime API base pointer
+    auto temp = OrtGetApiBase();
+    Ort::InitApi();
+    Ort::Env env;
+    auto devices = env.GetEpDevices();
+    printf("Before registration, %zu devices\n", devices.size());
+
     // Get the WinML factory instance, use it to get a catalog instance
     Microsoft::WRL::ComPtr<ABI::Microsoft::Windows::AI::MachineLearning::IExecutionProviderCatalogStatics> executionProviderCatalogStatics;
     RETURN_IF_FAILED(::Windows::Foundation::GetActivationFactory(
@@ -145,9 +154,6 @@ HRESULT SetUpWinML(void const** ortApiBase)
 
     Microsoft::WRL::ComPtr<ABI::Microsoft::Windows::AI::MachineLearning::IExecutionProviderCatalog> executionProviderCatalog;
     RETURN_IF_FAILED(executionProviderCatalogStatics->GetDefault(&executionProviderCatalog));
-
-    // Get the Onnx Runtime API base pointer
-    auto temp = OrtGetApiBase();
 
     // Register all execution providers asynchronously, wait for them to finish
     Microsoft::WRL::ComPtr<ABI::Windows::Foundation::IAsyncOperationWithProgress<ABI::Windows::Foundation::Collections::IVector<ABI::Microsoft::Windows::AI::MachineLearning::ExecutionProvider*>*, double>> registerAllOperation;
@@ -163,18 +169,20 @@ HRESULT SetUpWinML(void const** ortApiBase)
             }).Get()));
     RETURN_LAST_ERROR_IF(!registrationCompletedEvent.wait());
 
+    devices = env.GetEpDevices();
+    printf("After registration, %zu devices\n", devices.size());
+
     return S_OK;
 }
 
 int main(int, char**){
-    void const* ortApiBase = nullptr;
-    HRESULT hr = SetUpWinML(&ortApiBase);
+    HRESULT hr = SetUpWinML();
     if (FAILED(hr)) {
         printf("Failed to set up WinML with error code: 0x%08X\n", hr);
         return -1;
     }
     else {
-        printf("Successfully set up WinML with OnnxRuntime - Ort base address is 0x%08p \n", ortApiBase);
+        printf("Successfully set up WinML with OnnxRuntime!\n");
         return 0;
     }
 }

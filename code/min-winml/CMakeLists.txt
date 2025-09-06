@@ -14,6 +14,7 @@ add_executable(minimal-full-winml-sample
 
 target_include_directories(minimal-full-winml-sample PRIVATE 
 	${CMAKE_CURRENT_SOURCE_DIR}/windowsappsdk/inc/abi/winml
+	${CMAKE_CURRENT_SOURCE_DIR}/windowsappsdk/inc/abi/winml/onnxruntime
 	${CMAKE_CURRENT_SOURCE_DIR}/windowsappsdk/inc/abi/runtime
 )
 
