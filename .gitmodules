@@ -1,0 +1,3 @@
+[submodule "code/min-winml/windowsappsdk"]
+	path = code/min-winml/windowsappsdk
+	url = http://github.com/microsoft/windowsappsdk
