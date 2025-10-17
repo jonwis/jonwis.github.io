@@ -12,7 +12,8 @@
             "cacheVariables": {
                 "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
                 "CMAKE_C_COMPILER": "cl.exe",
-                "CMAKE_CXX_COMPILER": "cl.exe"
+                "CMAKE_CXX_COMPILER": "cl.exe",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
             }
         }
     ],
@@ -21,7 +22,10 @@
             "name": "vsbuild-debug",
             "displayName": "Visual Studio Professional 2022 Release - amd64 - Debug",
             "configurePreset": "vsbuild",
-            "configuration": "Debug"
+            "configuration": "Debug",
+            "nativeToolOptions": [
+                "/maxcpucount"
+            ]
         }
     ]
 }
