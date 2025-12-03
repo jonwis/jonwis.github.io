@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="SchedulingToys.vcxproj" />
+  <Project Path="SchedulingToys.vcxproj" Id="ca81e125-9ea1-42c8-af53-cda78d7444e9" />
 </Solution>

@@ -10,6 +10,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(minimal-full-winml-sample
 	windowsappsdk/inc/abi/winml/WindowsMLAutoInitializer.cpp
+	${WINDOWS_SDK_INCLUDE_DIR}/um/bits1_5.idl
 	main.cpp)
 
 target_include_directories(minimal-full-winml-sample PRIVATE 
