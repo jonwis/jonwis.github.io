@@ -84,7 +84,7 @@ struct WorkerQueue
         }
 
         // Wake the worker thread to process any pending work
-        m_eventWatcher.SetEvent();
+        m_workEvent.SetEvent();
 
         // Wait for the work to finish
         work.wait_for_completion();

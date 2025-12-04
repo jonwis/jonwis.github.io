@@ -1,5 +1,6 @@
 #include <Windows.h>
 #include <functional>
+#include <algorithm>
 #include <atomic>
 #include <thread>
 #include <barrier>
@@ -153,25 +154,37 @@ private:
 int test_queue_processor()
 {
     ThreadpoolQueueProcessor processor;
-    std::thread threads[25];
-    bool thread_threw[25]{};
-    std::barrier stop_point(15);
+
+    struct thread_item
+    {
+        std::thread thread;
+        uint32_t index{ 0 };
+        uint32_t execOrder{ 0 };
+        uint32_t priority{ 0 };
+        bool threw{ false };
+    };
+
+    uint32_t order{ 0 };
+    thread_item threads[25 + 1];
+    std::barrier stop_point(std::size(threads));
 
     for (int i = 0; i < std::size(threads); ++i)
     {
-        threads[i] = std::thread([&processor, i, &stop_point, &thread_threw]() {
-            bool highPriority = (i % 3 == 0);
+        threads[i].index = i;
+        threads[i].priority = i % 3;
+        threads[i].thread = std::thread([&processor, i, &order, &threads, &stop_point]() {
             try
             {
-                processor.QueueAndWait([i, highPriority, &stop_point]() {
+                processor.QueueAndWait([i, &order, &threads, &stop_point]() {
                     // Simulate work
+                    threads[i].execOrder = ++order;
                     Sleep(10);
                     std::ignore = stop_point.arrive();
-                    }, highPriority);
+                    }, threads[i].priority == 0);
             }
             catch(wil::ResultException&)
             {
-                thread_threw[i] = true;
+                threads[i].threw = true;
             }
         });
     }
@@ -182,11 +195,15 @@ int test_queue_processor()
     // Wait for all threads to complete
     for (auto& t : threads)
     {
-        t.join();
+        t.thread.join();
     }
 
-    // Some of them should have throwin.
-    auto threw_count = std::count(std::begin(thread_threw), std::end(thread_threw), true);
-    std::cout << "Some threads threw: " << (threw_count ? "yes" : "no") << std::endl;
+    // Exec order:
+    std::sort(std::begin(threads), std::end(threads), [](auto const& a, auto const& b) {
+        return a.execOrder < b.execOrder;
+        });
+    for (int i = 0; i < std::size(threads); ++i) {
+        std::cout << std::format("Thread idx {:5} ran at {:5}, high priority {} threw {}", threads[i].index, threads[i].execOrder, threads[i].priority, threads[i].threw) << std::endl;
+    }
     return 0;
 }
