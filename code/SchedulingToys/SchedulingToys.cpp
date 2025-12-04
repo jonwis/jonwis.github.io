@@ -111,11 +111,12 @@ void test_thread_ordering(char const* primitive_name)
     }
 }
 
-int test_queue_processor();
+int test_queue_processor(bool inheritThreadPriority);
 
 int main()
 {
-    test_queue_processor();
+    test_queue_processor(false);
+    test_queue_processor(true);
     test_thread_ordering<std::mutex, 50>("mutex");
     test_thread_ordering<std::recursive_mutex, 50>("recursive mutex");
     test_thread_ordering<std::shared_mutex, 50>("shared mutex");

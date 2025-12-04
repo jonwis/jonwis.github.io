@@ -151,8 +151,10 @@ private:
     TP_CALLBACK_ENVIRON m_highPriorityCallbackEnv{};
 };
 
-int test_queue_processor()
+int test_queue_processor(bool inheritThreadPriority)
 {
+    std::cout << "Threadpool based processor, using ambient thread priority " << std::boolalpha << inheritThreadPriority << std::endl;
+
     ThreadpoolQueueProcessor processor;
 
     struct thread_item
@@ -172,15 +174,28 @@ int test_queue_processor()
     {
         threads[i].index = i;
         threads[i].priority = i % 3;
-        threads[i].thread = std::thread([&processor, i, &order, &threads, &stop_point]() {
+        threads[i].thread = std::thread([&processor, i, &order, &threads, &inheritThreadPriority, &stop_point]() {
             try
             {
-                processor.QueueAndWait([i, &order, &threads, &stop_point]() {
+                if (inheritThreadPriority)
+                {
+                    BOOL wasSet = 0;
+                    if (threads[i].priority == 0)
+                    {
+                        wasSet = ::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+                    }
+                    else
+                    {
+                        wasSet = ::SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+                    }
+                }
+
+                processor.QueueAndWait([i, &order, &threads, &inheritThreadPriority, &stop_point]() {
                     // Simulate work
                     threads[i].execOrder = ++order;
                     Sleep(10);
                     std::ignore = stop_point.arrive();
-                    }, threads[i].priority == 0);
+                    }, inheritThreadPriority ? false : (threads[i].priority == 0));
             }
             catch(wil::ResultException&)
             {
