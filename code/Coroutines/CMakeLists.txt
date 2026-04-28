@@ -5,4 +5,5 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
 add_executable(coroutines coroutines.cpp)
 find_package(wil CONFIG REQUIRED)
-target_link_libraries(coroutines PRIVATE WIL::WIL OneCoreUAP)
+find_package(cppwinrt CONFIG REQUIRED)
+target_link_libraries(coroutines PRIVATE WIL::WIL  OneCoreUAP)
