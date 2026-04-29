@@ -316,30 +316,34 @@ namespace another_attempt
     /*
         This produces similar codegen to the above; the inliner loves to inline the slot-check-then-call:
 
-            cppwinrt_proj!another_attempt::InterfaceCacheBlock<winrt::Windows::Foundation::Collections::IPropertySet,winrt::Windows::Foundation::Collections::IMap<winrt::hstring,winrt::Windows::Foundation::IInspectable>,winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::Collections::IKeyValuePair<winrt::hstring,winrt::Windows::Foundation::IInspectable> >,winrt::Windows::Foundation::Collections::IObservableMap<winrt::hstring,winrt::Windows::Foundation::IInspectable> >::get_interface_abi [F:\holding\jonwis.github.io\code\cppwinrt-proj\experiment.cpp @ 365] [inlined in cppwinrt_proj!comparison<another_attempt::PropertySet>+0x45 [F:\holding\jonwis.github.io\code\cppwinrt-proj\shared.h @ 26]]:
-            00000001`40003325 488b4dd0        mov     rcx,qword ptr [rbp-30h]
-            00000001`40003329 4885c9          test    rcx,rcx
-            00000001`4000332c 751b            jne     cppwinrt_proj!comparison<another_attempt::PropertySet>+0x69 (00000001`40003349)
-            00000001`4000332e 488b45c0        mov     rax,qword ptr [rbp-40h]
-            00000001`40003332 488b08          mov     rcx,qword ptr [rax]
-            00000001`40003335 488b01          mov     rax,qword ptr [rcx]
-            00000001`40003338 4c8d45d0        lea     r8,[rbp-30h]
-            00000001`4000333c 488d15cd5a0000  lea     rdx,[cppwinrt_proj!winrt::impl::guid_v<winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::Collections::IKeyValuePair<winrt::hstring,winrt::Windows::Foundation::IInspectable> > > (00000001`40008e10)]
-            00000001`40003343 ff10            call    qword ptr [rax]
-            00000001`40003345 488b4dd0        mov     rcx,qword ptr [rbp-30h]
-            00000001`40003349 e8c2f5ffff      call    cppwinrt_proj!consume (00000001`40002910)
+            00000001`40003340 488b4dc8        mov     rcx,qword ptr [rbp-38h]
+            00000001`40003344 4885c9          test    rcx,rcx
+            00000001`40003347 752e            jne     cppwinrt_proj!comparison<another_attempt::PropertySet>+0x97 (00000001`40003377)
+            00000001`40003349 c745a86c010000  mov     dword ptr [rbp-58h],16Ch
+            00000001`40003350 488975b0        mov     qword ptr [rbp-50h],rsi
+            00000001`40003354 488b45b8        mov     rax,qword ptr [rbp-48h]
+            00000001`40003358 488b08          mov     rcx,qword ptr [rax]
+            00000001`4000335b 488b01          mov     rax,qword ptr [rcx]
+            00000001`4000335e 4c8d45c8        lea     r8,[rbp-38h]
+            00000001`40003362 488d15e75a0000  lea     rdx,[cppwinrt_proj!winrt::impl::guid_v<winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::Collections::IKeyValuePair<winrt::hstring,winrt::Windows::Foundation::IInspectable> > > (00000001`40008e50)]
+            00000001`40003369 ff10            call    qword ptr [rax]
+            00000001`4000336b 85c0            test    eax,eax
+            00000001`4000336d 0f88b7020000    js      cppwinrt_proj!comparison<another_attempt::PropertySet>+0x34a (00000001`4000362a)
+            00000001`40003373 488b4dc8        mov     rcx,qword ptr [rbp-38h]
+            00000001`40003377 e894f5ffff      call    cppwinrt_proj!consume (00000001`40002910)
 
         So this is:
         
-        * Test the cache slot [rbp-38h] for the requested interface; if it's non-null, jump to the call point
-        * If it's null, prepare the parameters for the QueryInterface call:
-            * Move the default-interface 'this' pointer from [rbp-40h] into rax
-            * Dereference the vtable from rax, then dereference the QueryInterface slot from the vtable into rax
-            * Load the address of the cache slot into r8
-            * Load the IID of the requested interface into rdx
-            * Call the QueryInterface method pointer with those parameters; the implementation of get_interface_abi() will store the result in the cache slot if successful, and return it
-            * Move the returned interface pointer from rax into rcx for the consume() call
-        * Call consume() with the requested interface pointer
+            * Test the cache slot [rbp-38h] for the requested interface; if it's non-null, jump to the call point
+            * If it's null, prepare the parameters for the QueryInterface call:
+                * Move the default-interface 'this' pointer from [rbp-40h] into rax
+                * Dereference the vtable from rax, then dereference the QueryInterface slot from the vtable into rax
+                * Load the address of the cache slot into r8
+                * Load the IID of the requested interface into rdx
+                * Call the QueryInterface method pointer with those parameters
+                * Test the HRESULT for failure and jump to an exit point if it failed
+                * Move the returned interface pointer from rax into rcx for the consume() call
+            * Call consume() with the requested interface pointer
     */
     
     template<typename... Is> struct InterfaceCacheBlock
@@ -361,7 +365,7 @@ namespace another_attempt
         {
             if (!stored)
             {
-                default_iface.as(iid, &stored);
+                winrt::check_hresult(default_iface.as(iid, &stored));
             }
             return stored;
         }
