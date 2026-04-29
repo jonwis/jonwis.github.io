@@ -38,3 +38,14 @@ template<typename PSType> int comparison()
 
     return 0;
 }
+
+template<typename T, typename Tuple> struct type_index {
+    static_assert(std::tuple_size_v<Tuple> > 0, "Tuple must have at least one type.");
+};
+template<typename T, typename... Types> struct type_index<T, std::tuple<T, Types...>> {
+    static constexpr size_t value = 0;
+};
+template<typename T, typename U, typename... Types> struct type_index<T, std::tuple<U, Types...>> {
+    static constexpr size_t value = 1 + type_index<T, std::tuple<Types...>>::value;
+};
+template<typename T, typename Tuple> constexpr size_t type_index_v = type_index<T, Tuple>::value;

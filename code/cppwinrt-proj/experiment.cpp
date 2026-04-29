@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <unknwn.h>
 #include <iostream>
+#include <span>
+#include <array>
 #include "shared.h"
 
 /*
@@ -309,11 +311,140 @@ namespace virtual_wrapper
     };
 }
 
+namespace another_attempt
+{
+    /*
+        This produces similar codegen to the above; the inliner loves to inline the slot-check-then-call:
+
+            cppwinrt_proj!another_attempt::InterfaceCacheBlock<winrt::Windows::Foundation::Collections::IPropertySet,winrt::Windows::Foundation::Collections::IMap<winrt::hstring,winrt::Windows::Foundation::IInspectable>,winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::Collections::IKeyValuePair<winrt::hstring,winrt::Windows::Foundation::IInspectable> >,winrt::Windows::Foundation::Collections::IObservableMap<winrt::hstring,winrt::Windows::Foundation::IInspectable> >::get_interface_abi [F:\holding\jonwis.github.io\code\cppwinrt-proj\experiment.cpp @ 365] [inlined in cppwinrt_proj!comparison<another_attempt::PropertySet>+0x45 [F:\holding\jonwis.github.io\code\cppwinrt-proj\shared.h @ 26]]:
+            00000001`40003325 488b4dd0        mov     rcx,qword ptr [rbp-30h]
+            00000001`40003329 4885c9          test    rcx,rcx
+            00000001`4000332c 751b            jne     cppwinrt_proj!comparison<another_attempt::PropertySet>+0x69 (00000001`40003349)
+            00000001`4000332e 488b45c0        mov     rax,qword ptr [rbp-40h]
+            00000001`40003332 488b08          mov     rcx,qword ptr [rax]
+            00000001`40003335 488b01          mov     rax,qword ptr [rcx]
+            00000001`40003338 4c8d45d0        lea     r8,[rbp-30h]
+            00000001`4000333c 488d15cd5a0000  lea     rdx,[cppwinrt_proj!winrt::impl::guid_v<winrt::Windows::Foundation::Collections::IIterable<winrt::Windows::Foundation::Collections::IKeyValuePair<winrt::hstring,winrt::Windows::Foundation::IInspectable> > > (00000001`40008e10)]
+            00000001`40003343 ff10            call    qword ptr [rax]
+            00000001`40003345 488b4dd0        mov     rcx,qword ptr [rbp-30h]
+            00000001`40003349 e8c2f5ffff      call    cppwinrt_proj!consume (00000001`40002910)
+
+        So this is:
+        
+        * Test the cache slot [rbp-38h] for the requested interface; if it's non-null, jump to the call point
+        * If it's null, prepare the parameters for the QueryInterface call:
+            * Move the default-interface 'this' pointer from [rbp-40h] into rax
+            * Dereference the vtable from rax, then dereference the QueryInterface slot from the vtable into rax
+            * Load the address of the cache slot into r8
+            * Load the IID of the requested interface into rdx
+            * Call the QueryInterface method pointer with those parameters; the implementation of get_interface_abi() will store the result in the cache slot if successful, and return it
+            * Move the returned interface pointer from rax into rcx for the consume() call
+        * Call consume() with the requested interface pointer
+    */
+    
+    template<typename... Is> struct InterfaceCacheBlock
+    {
+        InterfaceCacheBlock(void* abi = nullptr) : cache{abi}
+        {
+        }
+
+        using type_list_t = std::tuple<Is...>;
+        mutable std::array<void*, sizeof...(Is)> cache{nullptr};
+        template<typename I> static constexpr size_t index_of = type_index_v<I, type_list_t>;
+
+        template<typename TIface> TIface const& get_interface() const
+        {
+            return *static_cast<TIface const*>(get_interface_abi(get_default(), cache[index_of<TIface>], winrt::guid_of<TIface>()));
+        }
+
+        static void* get_interface_abi(IInspectable const& default_iface, void* &stored, winrt::guid const& iid)
+        {
+            if (!stored)
+            {
+                default_iface.as(iid, &stored);
+            }
+            return stored;
+        }
+
+        auto& get_default() const
+        {
+            return *static_cast<std::tuple_element_t<0, type_list_t> const*>(cache[0]);
+        }
+    };
+
+    struct PropertySet : protected InterfaceCacheBlock<IPropertySet, IMap<winrt::hstring, IInspectable>, IIterable<IKeyValuePair<winrt::hstring, IInspectable>>, IObservableMap<winrt::hstring, IInspectable>>
+    {
+    public:
+        PropertySet() : InterfaceCacheBlock(winrt::detach_abi(winrt::Windows::Foundation::Collections::PropertySet{}))
+        {
+        }
+
+        operator IPropertySet const&() const { return get_interface<IPropertySet>(); }
+        operator IMap<winrt::hstring, IInspectable> const&() const { return get_interface<IMap<winrt::hstring, IInspectable>>(); }
+        operator IIterable<IKeyValuePair<winrt::hstring, IInspectable>> const&() const { return get_interface<IIterable<IKeyValuePair<winrt::hstring, IInspectable>>>(); }
+        operator IObservableMap<winrt::hstring, IInspectable> const&() const { return get_interface<IObservableMap<winrt::hstring, IInspectable>>(); }
+
+        template<typename Q> auto as() const { return get_default().as<Q>(); }
+        template<typename Q> auto try_as() const { return get_default().try_as<Q>(); }
+
+        auto First() const
+        {
+            return get_interface<IIterable<IKeyValuePair<winrt::hstring, IInspectable>>>().First();
+        }
+
+        auto Size() const
+        {
+            return get_interface<IMap<winrt::hstring, IInspectable>>().Size();
+        }
+
+        auto Clear() const
+        {
+            return get_interface<IMap<winrt::hstring, IInspectable>>().Clear();
+        }
+
+        auto GetView() const
+        {
+            return get_interface<IMap<winrt::hstring, IInspectable>>().GetView();
+        }
+
+        auto HasKey(winrt::param::hstring key) const
+        {
+            return get_interface<IMap<winrt::hstring, IInspectable>>().HasKey(static_cast<winrt::hstring const&>(key));
+        }
+
+        auto Insert(winrt::param::hstring key, IInspectable const& value) const
+        {
+            return get_interface<IMap<winrt::hstring, IInspectable>>().Insert(static_cast<winrt::hstring const&>(key), value);
+        }
+
+        auto Lookup(winrt::param::hstring key) const
+        {
+            return get_interface<IMap<winrt::hstring, IInspectable>>().Lookup(static_cast<winrt::hstring const&>(key));
+        }
+
+        auto Remove(winrt::param::hstring key) const
+        {
+            return get_interface<IMap<winrt::hstring, IInspectable>>().Remove(static_cast<winrt::hstring const&>(key));
+        }
+
+        auto MapChanged(winrt::Windows::Foundation::Collections::MapChangedEventHandler<winrt::hstring, IInspectable> const& vhnd) const
+        {
+            return get_interface<IObservableMap<winrt::hstring, IInspectable>>().MapChanged(vhnd);
+        }
+
+        void MapChanged(winrt::event_token const& token) const noexcept
+        {
+            get_interface<IObservableMap<winrt::hstring, IInspectable>>().MapChanged(token);
+        }
+    };
+}
+
 int main()
 {
     winrt::init_apartment();
     comparison<use_cached_directly::PropertySet>();
     comparison<virtual_wrapper::PropertySet>();
+    comparison<another_attempt::PropertySet>();
     comparison<winrt::Windows::Foundation::Collections::PropertySet>();
 }
 
