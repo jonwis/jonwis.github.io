@@ -1,252 +1,11 @@
-#include <windows.h>
-#include <unknwn.h>
 #include <iostream>
 #include <thread>
 #include <vector>
 #include <atomic>
 #include <cassert>
-#include <span>
-#include <array>
-#include <winrt/base.h>
-#include <winrt/Windows.Foundation.Collections.h>
-#include <winrt/Windows.Foundation.h>
-#include <winrt/Windows.Storage.Streams.h>
+#include "thunk_experiment.h"
 
-// Pull in the thunked runtime class infrastructure from the same namespace
-// We redefine it here to keep the test self-contained.
-
-using winrt::Windows::Foundation::Collections::IPropertySet;
-using winrt::Windows::Foundation::Collections::IObservableMap;
-using winrt::Windows::Foundation::Collections::IIterable;
-using winrt::Windows::Foundation::Collections::IKeyValuePair;
-using winrt::Windows::Foundation::Collections::IIterator;
-using winrt::Windows::Foundation::Collections::IMap;
-using winrt::Windows::Foundation::Collections::IMapView;
-using winrt::Windows::Foundation::IInspectable;
-using winrt::Windows::Foundation::IClosable;
-using winrt::Windows::Storage::Streams::IRandomAccessStream;
-using winrt::Windows::Storage::Streams::IInputStream;
-using winrt::Windows::Storage::Streams::IOutputStream;
-
-// ============================================================================
-// Thunk infrastructure (matches experiment.cpp's generic_mutating namespace)
-// ============================================================================
-
-struct InterfaceThunk
-{
-    void const* const* vtable;
-    void* default_abi;
-    std::atomic<void*>* cache_slot;
-    GUID const* iid;
-
-    __declspec(noinline) void* resolve() const
-    {
-        void* current = cache_slot->load(std::memory_order_acquire);
-        if (current != static_cast<void const*>(this))
-            return current;
-
-        void* real = nullptr;
-        winrt::check_hresult(static_cast<::IUnknown*>(default_abi)->QueryInterface(*iid, &real));
-
-        void* expected = const_cast<InterfaceThunk*>(this);
-        if (!cache_slot->compare_exchange_strong(expected, real, std::memory_order_release, std::memory_order_acquire))
-        {
-            static_cast<::IUnknown*>(real)->Release();
-            return expected;
-        }
-        return real;
-    }
-};
-
-extern "C" void* generic_mutating_resolve_thunk(InterfaceThunk const* thunk)
-{
-    return thunk->resolve();
-}
-
-inline constexpr size_t kMaxVtableSlots = 256;
-extern "C" const void* generic_mutating_thunk_vtable[kMaxVtableSlots];
-
-inline void init_thunk(InterfaceThunk& t, void* default_abi, std::atomic<void*>* cache_slot, GUID const* iid)
-{
-    t.vtable = reinterpret_cast<void const* const*>(generic_mutating_thunk_vtable);
-    t.default_abi = default_abi;
-    t.cache_slot = cache_slot;
-    t.iid = iid;
-}
-
-template<size_t N>
-struct ThunkedRuntimeClass
-{
-    mutable std::atomic<void*> cache[N + 1]{};
-    mutable InterfaceThunk thunks[N]{};
-    GUID const* const* iids_{};
-
-protected:
-    ThunkedRuntimeClass(void* default_abi, std::span<GUID const* const, N> iids) : iids_(iids.data()) { attach(default_abi); }
-    ThunkedRuntimeClass() = default;
-
-    void attach(void* default_abi)
-    {
-        cache[0].store(default_abi, std::memory_order_relaxed);
-        for (size_t i = 0; i < N; ++i)
-        {
-            cache[i + 1].store(&thunks[i], std::memory_order_relaxed);
-            init_thunk(thunks[i], default_abi, &cache[i + 1], iids_[i]);
-        }
-    }
-
-    void clear()
-    {
-        if (auto p = cache[0].exchange(nullptr, std::memory_order_acquire))
-            static_cast<::IUnknown*>(p)->Release();
-        for (size_t i = 0; i < N; ++i)
-        {
-            auto p = cache[i + 1].exchange(nullptr, std::memory_order_acquire);
-            if (p && p != &thunks[i])
-                static_cast<::IUnknown*>(p)->Release();
-        }
-    }
-
-public:
-    ~ThunkedRuntimeClass() { clear(); }
-
-    ThunkedRuntimeClass(ThunkedRuntimeClass const& other) : iids_(other.iids_)
-    {
-        if (auto p = other.cache[0].load(std::memory_order_relaxed))
-        {
-            static_cast<::IUnknown*>(p)->AddRef();
-            attach(p);
-        }
-    }
-
-    ThunkedRuntimeClass(ThunkedRuntimeClass&& other) noexcept : iids_(other.iids_)
-    {
-        auto p = other.cache[0].exchange(nullptr, std::memory_order_acquire);
-        if (p) attach(p);
-        other.clear();
-    }
-
-    ThunkedRuntimeClass& operator=(ThunkedRuntimeClass const& other)
-    {
-        if (this != &other)
-        {
-            clear();
-            iids_ = other.iids_;
-            if (auto p = other.cache[0].load(std::memory_order_relaxed))
-            {
-                static_cast<::IUnknown*>(p)->AddRef();
-                attach(p);
-            }
-        }
-        return *this;
-    }
-
-    ThunkedRuntimeClass& operator=(ThunkedRuntimeClass&& other) noexcept
-    {
-        if (this != &other)
-        {
-            clear();
-            iids_ = other.iids_;
-            auto p = other.cache[0].exchange(nullptr, std::memory_order_acquire);
-            if (p) attach(p);
-            other.clear();
-        }
-        return *this;
-    }
-
-    template<typename T>
-    T const& iface(size_t slot) const { return *reinterpret_cast<T const*>(&cache[slot]); }
-
-    explicit operator bool() const noexcept { return cache[0].load(std::memory_order_relaxed) != nullptr; }
-};
-
-// ============================================================================
-// Thunked PropertySet (3 secondary interfaces)
-// ============================================================================
-
-struct PropertySet : protected ThunkedRuntimeClass<3>
-{
-    static inline const GUID iid_map = winrt::guid_of<IMap<winrt::hstring, IInspectable>>();
-    static inline const GUID iid_iterable = winrt::guid_of<IIterable<IKeyValuePair<winrt::hstring, IInspectable>>>();
-    static inline const GUID iid_observable = winrt::guid_of<IObservableMap<winrt::hstring, IInspectable>>();
-    static constexpr GUID const* iids[] = { &iid_map, &iid_iterable, &iid_observable };
-
-    PropertySet() : ThunkedRuntimeClass(winrt::detach_abi(winrt::Windows::Foundation::Collections::PropertySet{}), iids) {}
-    PropertySet(nullptr_t) : ThunkedRuntimeClass(nullptr, iids) {}
-    PropertySet(PropertySet const&) = default;
-    PropertySet(PropertySet&&) noexcept = default;
-    PropertySet& operator=(PropertySet const&) = default;
-    PropertySet& operator=(PropertySet&&) noexcept = default;
-    using ThunkedRuntimeClass::operator bool;
-
-    auto& default_iface() const { return iface<IPropertySet>(0); }
-    auto& map_iface() const { return iface<IMap<winrt::hstring, IInspectable>>(1); }
-    auto& iterable_iface() const { return iface<IIterable<IKeyValuePair<winrt::hstring, IInspectable>>>(2); }
-    auto& observable_iface() const { return iface<IObservableMap<winrt::hstring, IInspectable>>(3); }
-
-    operator IPropertySet const&() const { return default_iface(); }
-    operator IMap<winrt::hstring, IInspectable> const&() const { return map_iface(); }
-    operator IIterable<IKeyValuePair<winrt::hstring, IInspectable>> const&() const { return iterable_iface(); }
-    operator IObservableMap<winrt::hstring, IInspectable> const&() const { return observable_iface(); }
-
-    template<typename Q> auto as() const { return default_iface().as<Q>(); }
-    template<typename Q> auto try_as() const { return default_iface().try_as<Q>(); }
-
-    auto First() const { return iterable_iface().First(); }
-    auto Size() const { return map_iface().Size(); }
-    auto Clear() const { return map_iface().Clear(); }
-    auto GetView() const { return map_iface().GetView(); }
-    auto HasKey(winrt::param::hstring key) const { return map_iface().HasKey(key); }
-    auto Insert(winrt::param::hstring key, IInspectable const& value) const { return map_iface().Insert(key, value); }
-    auto Lookup(winrt::param::hstring key) const { return map_iface().Lookup(key); }
-    auto Remove(winrt::param::hstring key) const { return map_iface().Remove(key); }
-};
-
-// ============================================================================
-// Thunked InMemoryRandomAccessStream (3 secondary: IInputStream, IOutputStream, IClosable)
-// ============================================================================
-
-struct InMemoryRandomAccessStream : protected ThunkedRuntimeClass<3>
-{
-    static inline const GUID iid_input = winrt::guid_of<IInputStream>();
-    static inline const GUID iid_output = winrt::guid_of<IOutputStream>();
-    static inline const GUID iid_closable = winrt::guid_of<IClosable>();
-    static constexpr GUID const* iids[] = { &iid_input, &iid_output, &iid_closable };
-
-    InMemoryRandomAccessStream()
-        : ThunkedRuntimeClass(winrt::detach_abi(winrt::Windows::Storage::Streams::InMemoryRandomAccessStream{}), iids) {}
-    InMemoryRandomAccessStream(nullptr_t) : ThunkedRuntimeClass(nullptr, iids) {}
-    InMemoryRandomAccessStream(InMemoryRandomAccessStream const&) = default;
-    InMemoryRandomAccessStream(InMemoryRandomAccessStream&&) noexcept = default;
-    InMemoryRandomAccessStream& operator=(InMemoryRandomAccessStream const&) = default;
-    InMemoryRandomAccessStream& operator=(InMemoryRandomAccessStream&&) noexcept = default;
-    using ThunkedRuntimeClass::operator bool;
-
-    auto& default_iface() const { return iface<IRandomAccessStream>(0); }
-    auto& input_iface() const { return iface<IInputStream>(1); }
-    auto& output_iface() const { return iface<IOutputStream>(2); }
-    auto& closable_iface() const { return iface<IClosable>(3); }
-
-    operator IRandomAccessStream const&() const { return default_iface(); }
-    operator IInputStream const&() const { return input_iface(); }
-    operator IOutputStream const&() const { return output_iface(); }
-    operator IClosable const&() const { return closable_iface(); }
-
-    template<typename Q> auto as() const { return default_iface().as<Q>(); }
-    template<typename Q> auto try_as() const { return default_iface().try_as<Q>(); }
-
-    auto Size() const { return default_iface().Size(); }
-    void Size(uint64_t value) const { default_iface().Size(value); }
-    auto Position() const { return default_iface().Position(); }
-    void Seek(uint64_t position) const { default_iface().Seek(position); }
-    auto CanRead() const { return default_iface().CanRead(); }
-    auto CanWrite() const { return default_iface().CanWrite(); }
-    auto CloneStream() const { return default_iface().CloneStream(); }
-    auto GetInputStreamAt(uint64_t position) const { return default_iface().GetInputStreamAt(position); }
-    auto GetOutputStreamAt(uint64_t position) const { return default_iface().GetOutputStreamAt(position); }
-    void Close() const { closable_iface().Close(); }
-    auto FlushAsync() const { return output_iface().FlushAsync(); }
-};
+using namespace generic_mutating;
 
 // ============================================================================
 // Test helpers
@@ -646,14 +405,12 @@ TEST(PropertySet_ConcurrentCopyAndUse)
 }
 
 // ============================================================================
-// Entry point
+// Entry point — called from experiment.cpp's main()
 // ============================================================================
 
-int main()
+void thunk_test()
 {
-    winrt::init_apartment(winrt::apartment_type::multi_threaded);
-
-    std::wcout << L"Running " << tests.size() << L" tests..." << std::endl;
+    std::wcout << L"Running " << tests.size() << L" thunk tests..." << std::endl;
 
     for (auto& test : tests)
     {
@@ -677,7 +434,5 @@ int main()
     }
 
     std::wcout << std::endl;
-    std::wcout << L"Results: " << g_pass << L" passed, " << g_fail << L" failed" << std::endl;
-
-    return g_fail > 0 ? 1 : 0;
+    std::wcout << L"Thunk test results: " << g_pass << L" passed, " << g_fail << L" failed" << std::endl;
 }

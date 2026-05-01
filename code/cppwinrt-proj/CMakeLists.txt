@@ -24,34 +24,22 @@ endif()
 if(THUNK_USE_ARMASM)
     # ARM64/ARM64EC: assemble with armasm64 via custom command
     set(THUNK_OBJ ${CMAKE_CURRENT_BINARY_DIR}/thunk_stubs.obj)
-    set(THUNK_OBJ_TESTS ${CMAKE_CURRENT_BINARY_DIR}/thunk_stubs_tests.obj)
     add_custom_command(
         OUTPUT ${THUNK_OBJ}
         COMMAND armasm64 -nologo -o ${THUNK_OBJ} ${THUNK_ASM_SOURCE}
         DEPENDS ${THUNK_ASM_SOURCE}
         COMMENT "Assembling ${THUNK_ASM_SOURCE} with armasm64"
     )
-    add_custom_command(
-        OUTPUT ${THUNK_OBJ_TESTS}
-        COMMAND armasm64 -nologo -o ${THUNK_OBJ_TESTS} ${THUNK_ASM_SOURCE}
-        DEPENDS ${THUNK_ASM_SOURCE}
-        COMMENT "Assembling ${THUNK_ASM_SOURCE} with armasm64 (tests)"
-    )
     add_executable(cppwinrt-proj experiment.cpp)
     target_link_libraries(cppwinrt-proj PRIVATE ${THUNK_OBJ})
     add_custom_target(thunk_stubs_asm DEPENDS ${THUNK_OBJ})
     add_dependencies(cppwinrt-proj thunk_stubs_asm)
-
-    add_executable(thunk-tests thunk_tests.cpp)
-    target_link_libraries(thunk-tests PRIVATE ${THUNK_OBJ_TESTS})
-    add_custom_target(thunk_stubs_asm_tests DEPENDS ${THUNK_OBJ_TESTS})
-    add_dependencies(thunk-tests thunk_stubs_asm_tests)
 else()
     add_executable(cppwinrt-proj experiment.cpp ${THUNK_ASM_SOURCE})
-    add_executable(thunk-tests thunk_tests.cpp ${THUNK_ASM_SOURCE})
 endif()
+
+target_sources(cppwinrt-proj PRIVATE thunk_tests.cpp)
 
 find_package(cppwinrt CONFIG REQUIRED)
 
 target_link_libraries(cppwinrt-proj PRIVATE Microsoft::CppWinRT OneCoreUAP)
-target_link_libraries(thunk-tests PRIVATE Microsoft::CppWinRT OneCoreUAP)
