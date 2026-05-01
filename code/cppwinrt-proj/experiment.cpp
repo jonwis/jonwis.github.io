@@ -937,9 +937,31 @@ namespace generic_mutating
     };
 }
 
+// Side-by-side comparison functions for disassembly analysis
+__declspec(noinline) IMapView<winrt::hstring, IInspectable> create_and_view_thunked()
+{
+    generic_mutating::PropertySet ps;
+    ps.Insert(L"a", winrt::box_value(1));
+    ps.Insert(L"b", winrt::box_value(2));
+    ps.Insert(L"c", winrt::box_value(3));
+    return ps.GetView();
+}
+
+__declspec(noinline) IMapView<winrt::hstring, IInspectable> create_and_view_cppwinrt()
+{
+    winrt::Windows::Foundation::Collections::PropertySet ps;
+    ps.Insert(L"a", winrt::box_value(1));
+    ps.Insert(L"b", winrt::box_value(2));
+    ps.Insert(L"c", winrt::box_value(3));
+    return ps.GetView();
+}
+
 int main()
 {
     winrt::init_apartment();
+    auto v1 = create_and_view_thunked();
+    auto v2 = create_and_view_cppwinrt();
+    std::wcout << L"Thunked view size: " << v1.Size() << L", CppWinRT view size: " << v2.Size() << std::endl;
     comparison<use_cached_directly::PropertySet>();
     comparison<cppwinrt_cheese::PropertySet>();
     comparison<virtual_wrapper::PropertySet>();
