@@ -20,6 +20,46 @@
                 "CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO": "/DEBUG /INCREMENTAL:NO /LTCG /OPT:REF /OPT:ICF",
                 "CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO": "/DEBUG /INCREMENTAL:NO /LTCG /OPT:REF /OPT:ICF"
             }
+        },
+        {
+            "name": "vsbuild-x86",
+            "displayName": "Visual Studio 2022 - x86",
+            "generator": "Visual Studio 17 2022",
+            "toolset": "host=x64",
+            "architecture": "Win32",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_TARGET_TRIPLET": "x86-windows"
+            }
+        },
+        {
+            "name": "vsbuild-arm64",
+            "displayName": "Visual Studio 2022 - ARM64",
+            "generator": "Visual Studio 17 2022",
+            "toolset": "host=x64",
+            "architecture": "ARM64",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_TARGET_TRIPLET": "arm64-windows"
+            }
+        },
+        {
+            "name": "vsbuild-arm64ec",
+            "displayName": "Visual Studio 2022 - ARM64EC",
+            "description": "ARM64EC build. Note: cppwinrt vcpkg port may not support arm64ec-windows triplet.",
+            "generator": "Visual Studio 17 2022",
+            "toolset": "host=x64",
+            "architecture": "ARM64EC",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_TARGET_TRIPLET": "arm64ec-windows"
+            }
         }
     ],
     "buildPresets": [
@@ -40,6 +80,27 @@
             "nativeToolOptions": [
                 "/maxcpucount"
             ]
+        },
+        {
+            "name": "vsbuild-x86-debug",
+            "displayName": "VS 2022 x86 Debug",
+            "configurePreset": "vsbuild-x86",
+            "configuration": "Debug",
+            "nativeToolOptions": [ "/maxcpucount" ]
+        },
+        {
+            "name": "vsbuild-arm64-debug",
+            "displayName": "VS 2022 ARM64 Debug",
+            "configurePreset": "vsbuild-arm64",
+            "configuration": "Debug",
+            "nativeToolOptions": [ "/maxcpucount" ]
+        },
+        {
+            "name": "vsbuild-arm64ec-debug",
+            "displayName": "VS 2022 ARM64EC Debug",
+            "configurePreset": "vsbuild-arm64ec",
+            "configuration": "Debug",
+            "nativeToolOptions": [ "/maxcpucount" ]
         }
     ]
 }
