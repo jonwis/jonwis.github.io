@@ -8,10 +8,10 @@
 ;   4. Restores caller's args, sets rcx = real object, tail-jumps to real method
 ;
 ; InterfaceThunk layout (must match C++ struct):
+;   [-8]  cache_slot (atomic<void*>, in CacheAndThunk before the thunk)
 ;   [+0]  vtable pointer (void const* const*)
 ;   [+8]  default_abi (void*)
-;   [+16] cache_slot (void**)
-;   [+24] iid (GUID const*)
+;   [+16] iid (GUID const*)
 ;
 ; Total binary size: 256 * 10 + ~100 = ~2660 bytes (vs ~20KB for template approach)
 
