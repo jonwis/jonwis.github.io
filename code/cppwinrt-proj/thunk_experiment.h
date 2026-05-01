@@ -27,7 +27,7 @@
     This eliminates the need to store a cache_slot pointer in each thunk, saving 8 bytes per
     thunk (24 bytes for N=3) plus removing the iids_ pointer and separate cache array.
 
-    Total per-instance cost for N=3: 8 + 3*32 = 104 bytes (vs 136 bytes in the original layout).
+    Total per-instance cost for N=3: 8 + 3*32 = 104 bytes
 
     Each InterfaceThunk masquerades as a COM object: its first field is a vtable pointer into
     a shared table of 256 MASM-generated stubs (thunk_stubs.asm). Each stub is 10 bytes:
@@ -128,26 +128,38 @@ namespace generic_mutating
         p.thunk.iid = iid;
     }
 
+    // index_of_type takes a type and a variadic list of types and returns the index of the first type that matches.
+    // If the type is not found, the index returned is sizeof...(Types), so it's important to check that the result is less than sizeof...(Types) before using it.
+    template<typename T, typename... Types>
+    struct type_index;
+
+    template<typename T, typename... Types>
+    struct type_index<T, T, Types...> : std::integral_constant<size_t, 0> {};
+
+    template<typename T, typename U, typename... Types>
+    struct type_index<T, U, Types...> : std::integral_constant<size_t, 1 + type_index<T, Types...>::value> {};
+
     // Base type for thunked runtime classes. N is the number of secondary (non-default) interfaces.
     // default_cache holds the default interface; pairs[0..N-1] each hold a cache slot + thunk.
-    template<size_t N>
+    template<typename IDefault, typename... I>
     struct ThunkedRuntimeClass
     {
+        inline static const std::array<winrt::guid const*, sizeof...(I)> iids{ &winrt::guid_of<I>()... };
         mutable std::atomic<void*> default_cache{};
-        mutable std::array<CacheAndThunk, N> pairs{};
+        mutable std::array<CacheAndThunk, sizeof...(I)> pairs{};
 
     protected:
-        ThunkedRuntimeClass(void* default_abi, std::span<winrt::guid const* const, N> iids)
+        ThunkedRuntimeClass(void* default_abi)
         {
             attach(default_abi, iids);
         }
 
         ThunkedRuntimeClass() = default;
 
-        void attach(void* default_abi, std::span<winrt::guid const* const, N> iids)
+        void attach(void* default_abi, std::span<winrt::guid const* const> iids)
         {
             default_cache.store(default_abi, std::memory_order_relaxed);
-            for (size_t i = 0; i < N; ++i)
+            for (size_t i = 0; i < iids.size(); ++i)
                 init_pair(pairs[i], default_abi, iids[i]);
         }
 
@@ -155,10 +167,10 @@ namespace generic_mutating
         {
             if (auto p = default_cache.exchange(nullptr, std::memory_order_acquire))
                 static_cast<::IUnknown*>(p)->Release();
-            for (size_t i = 0; i < N; ++i)
+            for (auto& slot : pairs)
             {
-                auto p = pairs[i].cache.exchange(nullptr, std::memory_order_acquire);
-                if (p && p != &pairs[i].thunk)
+                auto p = slot.cache.exchange(nullptr, std::memory_order_acquire);
+                if (p && p != &slot.thunk)
                     static_cast<::IUnknown*>(p)->Release();
             }
         }
@@ -168,7 +180,7 @@ namespace generic_mutating
 
         // Copy/move require iids from the derived class.
         // Derived types must supply them via a static constexpr iids array.
-        ThunkedRuntimeClass(ThunkedRuntimeClass const& other, std::span<winrt::guid const* const, N> iids)
+        ThunkedRuntimeClass(ThunkedRuntimeClass const& other)
         {
             if (auto p = other.default_cache.load(std::memory_order_relaxed))
             {
@@ -177,14 +189,14 @@ namespace generic_mutating
             }
         }
 
-        ThunkedRuntimeClass(ThunkedRuntimeClass&& other, std::span<winrt::guid const* const, N> iids) noexcept
+        ThunkedRuntimeClass(ThunkedRuntimeClass&& other) noexcept
         {
             auto p = other.default_cache.exchange(nullptr, std::memory_order_acquire);
             if (p) attach(p, iids);
             other.clear();
         }
 
-        ThunkedRuntimeClass& assign_copy(ThunkedRuntimeClass const& other, std::span<winrt::guid const* const, N> iids)
+        ThunkedRuntimeClass& assign_copy(ThunkedRuntimeClass const& other)
         {
             if (this != &other)
             {
@@ -198,7 +210,7 @@ namespace generic_mutating
             return *this;
         }
 
-        ThunkedRuntimeClass& assign_move(ThunkedRuntimeClass&& other, std::span<winrt::guid const* const, N> iids) noexcept
+        ThunkedRuntimeClass& assign_move(ThunkedRuntimeClass&& other) noexcept
         {
             if (this != &other)
             {
@@ -210,19 +222,22 @@ namespace generic_mutating
             return *this;
         }
 
-        template<typename Q> auto as() const { return default_ref<winrt::Windows::Foundation::IInspectable>().as<Q>(); }
-        template<typename Q> auto try_as() const { return default_ref<winrt::Windows::Foundation::IInspectable>().try_as<Q>(); }
+        template<typename Q> auto as() const { return reinterpret_cast<IDefault const*>(&default_cache)->as<Q>(); }
+        template<typename Q> auto try_as() const { return reinterpret_cast<IDefault const*>(&default_cache)->try_as<Q>(); }
+        operator IDefault const&() const { return *reinterpret_cast<IDefault const*>(&default_cache); }
 
         template<typename T>
-        T const& default_ref() const
+        operator T const&() const
         {
-            return *reinterpret_cast<T const*>(&default_cache);
-        }
-
-        template<typename T>
-        T const& secondary_ref(size_t index) const
-        {
-            return *reinterpret_cast<T const*>(&pairs[index].cache);
+            constexpr size_t iface_index = type_index<T, I...>::value;
+            if constexpr (iface_index == sizeof...(I))
+            {
+                return as<T>();
+            }
+            else
+            {
+                return *reinterpret_cast<T const*>(&pairs[iface_index].cache);
+            }
         }
 
         explicit operator bool() const noexcept
@@ -233,30 +248,23 @@ namespace generic_mutating
 
     // ---- PropertySet built on the generic thunk system ----
 
-    struct PropertySet : protected ThunkedRuntimeClass<3>
+    struct PropertySet : protected ThunkedRuntimeClass<IPropertySet, IMap<winrt::hstring, IInspectable>, IIterable<IKeyValuePair<winrt::hstring, IInspectable>>, IObservableMap<winrt::hstring, IInspectable>>
     {
-        static constexpr winrt::guid const* iids[] = { &winrt::guid_of<IMap<winrt::hstring, IInspectable>>(), &winrt::guid_of<IIterable<IKeyValuePair<winrt::hstring, IInspectable>>>(), &winrt::guid_of<IObservableMap<winrt::hstring, IInspectable>>() };
-
         PropertySet()
             : PropertySet(winrt::detach_abi(winrt::Windows::Foundation::Collections::PropertySet{}), winrt::take_ownership_from_abi)
         {
         }
 
-        PropertySet(nullptr_t) : ThunkedRuntimeClass(nullptr, iids) {}
-        PropertySet(void* p, winrt::take_ownership_from_abi_t) : ThunkedRuntimeClass(p, iids) {}
-        PropertySet(PropertySet const& other) : ThunkedRuntimeClass(other, iids) {}
-        PropertySet(PropertySet&& other) noexcept : ThunkedRuntimeClass(std::move(other), iids) {}
-        PropertySet& operator=(PropertySet const& other) { assign_copy(other, iids); return *this; }
-        PropertySet& operator=(PropertySet&& other) noexcept { assign_move(std::move(other), iids); return *this; }
+        PropertySet(nullptr_t) : ThunkedRuntimeClass(nullptr) {}
+        PropertySet(void* p, winrt::take_ownership_from_abi_t) : ThunkedRuntimeClass(p) {}
+        PropertySet(PropertySet const& other) : ThunkedRuntimeClass(other) {}
+        PropertySet(PropertySet&& other) noexcept : ThunkedRuntimeClass(std::move(other)) {}
+        PropertySet& operator=(PropertySet const& other) { assign_copy(other); return *this; }
+        PropertySet& operator=(PropertySet&& other) noexcept { assign_move(std::move(other)); return *this; }
 
         using ThunkedRuntimeClass::operator bool;
         using ThunkedRuntimeClass::as;
         using ThunkedRuntimeClass::try_as;
-
-        operator IPropertySet const&() const { return default_ref<IPropertySet>(); }
-        operator IMap<winrt::hstring, IInspectable> const&() const { return secondary_ref<IMap<winrt::hstring, IInspectable>>(0); }
-        operator IIterable<IKeyValuePair<winrt::hstring, IInspectable>> const&() const { return secondary_ref<IIterable<IKeyValuePair<winrt::hstring, IInspectable>>>(1); }
-        operator IObservableMap<winrt::hstring, IInspectable> const&() const { return secondary_ref<IObservableMap<winrt::hstring, IInspectable>>(2); }
 
         auto First() const { return static_cast<IIterable<IKeyValuePair<winrt::hstring, IInspectable>> const&>(*this).First(); }
         auto Size() const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Size(); }
@@ -279,36 +287,28 @@ namespace generic_mutating
 
     // ---- InMemoryRandomAccessStream (3 secondary: IInputStream, IOutputStream, IClosable) ----
 
-    struct InMemoryRandomAccessStream : protected ThunkedRuntimeClass<3>
+    struct InMemoryRandomAccessStream : protected ThunkedRuntimeClass<IRandomAccessStream, IInputStream, IOutputStream, IClosable>
     {
-        static constexpr winrt::guid const* iids[] = { &winrt::guid_of<IInputStream>(), &winrt::guid_of<IOutputStream>(), &winrt::guid_of<IClosable>() };
-
         InMemoryRandomAccessStream()
-            : ThunkedRuntimeClass(winrt::detach_abi(winrt::Windows::Storage::Streams::InMemoryRandomAccessStream{}), iids) {}
-        InMemoryRandomAccessStream(nullptr_t) : ThunkedRuntimeClass(nullptr, iids) {}
-        InMemoryRandomAccessStream(InMemoryRandomAccessStream const& other) : ThunkedRuntimeClass(other, iids) {}
-        InMemoryRandomAccessStream(InMemoryRandomAccessStream&& other) noexcept : ThunkedRuntimeClass(std::move(other), iids) {}
-        InMemoryRandomAccessStream& operator=(InMemoryRandomAccessStream const& other) { assign_copy(other, iids); return *this; }
-        InMemoryRandomAccessStream& operator=(InMemoryRandomAccessStream&& other) noexcept { assign_move(std::move(other), iids); return *this; }
+            : ThunkedRuntimeClass(winrt::detach_abi(winrt::Windows::Storage::Streams::InMemoryRandomAccessStream{})) {}
+        InMemoryRandomAccessStream(nullptr_t) : ThunkedRuntimeClass(nullptr) {}
+        InMemoryRandomAccessStream(InMemoryRandomAccessStream const& other) : ThunkedRuntimeClass(other) {}
+        InMemoryRandomAccessStream(InMemoryRandomAccessStream&& other) noexcept : ThunkedRuntimeClass(std::move(other)) {}
+        InMemoryRandomAccessStream& operator=(InMemoryRandomAccessStream const& other) { assign_copy(other); return *this; }
+        InMemoryRandomAccessStream& operator=(InMemoryRandomAccessStream&& other) noexcept { assign_move(std::move(other)); return *this; }
+        using ThunkedRuntimeClass::as;
+        using ThunkedRuntimeClass::try_as;
         using ThunkedRuntimeClass::operator bool;
 
-        operator IRandomAccessStream const&() const { return default_ref<IRandomAccessStream>(); }
-        operator IInputStream const&() const { return secondary_ref<IInputStream>(0); }
-        operator IOutputStream const&() const { return secondary_ref<IOutputStream>(1); }
-        operator IClosable const&() const { return secondary_ref<IClosable>(2); }
-
-        template<typename Q> auto as() const { return default_ref<IRandomAccessStream>().as<Q>(); }
-        template<typename Q> auto try_as() const { return default_ref<IRandomAccessStream>().try_as<Q>(); }
-
-        auto Size() const { return default_ref<IRandomAccessStream>().Size(); }
-        void Size(uint64_t value) const { default_ref<IRandomAccessStream>().Size(value); }
-        auto Position() const { return default_ref<IRandomAccessStream>().Position(); }
-        void Seek(uint64_t position) const { default_ref<IRandomAccessStream>().Seek(position); }
-        auto CanRead() const { return default_ref<IRandomAccessStream>().CanRead(); }
-        auto CanWrite() const { return default_ref<IRandomAccessStream>().CanWrite(); }
-        auto CloneStream() const { return default_ref<IRandomAccessStream>().CloneStream(); }
-        auto GetInputStreamAt(uint64_t position) const { return default_ref<IRandomAccessStream>().GetInputStreamAt(position); }
-        auto GetOutputStreamAt(uint64_t position) const { return default_ref<IRandomAccessStream>().GetOutputStreamAt(position); }
+        auto Size() const { return static_cast<IRandomAccessStream const&>(*this).Size(); }
+        void Size(uint64_t value) const { static_cast<IRandomAccessStream const&>(*this).Size(value); }
+        auto Position() const { return static_cast<IRandomAccessStream const&>(*this).Position(); }
+        void Seek(uint64_t position) const { static_cast<IRandomAccessStream const&>(*this).Seek(position); }
+        auto CanRead() const { return static_cast<IRandomAccessStream const&>(*this).CanRead(); }
+        auto CanWrite() const { return static_cast<IRandomAccessStream const&>(*this).CanWrite(); }
+        auto CloneStream() const { return static_cast<IRandomAccessStream const&>(*this).CloneStream(); }
+        auto GetInputStreamAt(uint64_t position) const { return static_cast<IRandomAccessStream const&>(*this).GetInputStreamAt(position); }
+        auto GetOutputStreamAt(uint64_t position) const { return static_cast<IRandomAccessStream const&>(*this).GetOutputStreamAt(position); }
         void Close() const { static_cast<IClosable const&>(*this).Close(); }
         auto FlushAsync() const { return static_cast<IOutputStream const&>(*this).FlushAsync(); }
     };
