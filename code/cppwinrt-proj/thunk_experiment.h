@@ -12,22 +12,22 @@
 /*
     Delay-load style interface caching for WinRT runtime classes.
 
-    A projected runtimeclass derives from ThunkedRuntimeClass<N>, where N is the number of
-    secondary (non-default) interfaces.
+    A projected runtimeclass derives from ThunkedRuntimeClass<IDefault, I...>.
 
-    Layout (for N secondary interfaces):
-        default_cache (8 bytes)      — atomic<void*> holding the default interface pointer
-        pairs[0] (32 bytes)          — { atomic<void*> cache, InterfaceThunk thunk }
-        pairs[1] (32 bytes)          — ...
-        ...
-        pairs[N-1] (32 bytes)
+    Layout (for N = sizeof...(I) secondary interfaces):
+        ThunkedRuntimeClassHeader (16 bytes):
+            iid_table (8 bytes)          — pointer to static array of IID pointers
+            default_cache (8 bytes)      — atomic<void*> holding the default interface pointer
+        pairs[0] (24 bytes)              — { atomic<void*> cache, InterfaceThunk thunk }
+        pairs[1] (24 bytes)              — ...
+        pairs[N-1] (24 bytes)
 
-    Each InterfaceThunk is 24 bytes: { vtable, default_abi, iid }.
+    Each InterfaceThunk is 16 bytes: { vtable, owner_tagged }.
+    owner_tagged packs a back-pointer to the ThunkedRuntimeClassHeader (for QI) and
+    the pair index (in the low 3 bits, safe because header is 8-byte aligned).
     The thunk's cache slot is ALWAYS at (this - 8) — the CacheAndThunk layout guarantees this.
-    This eliminates the need to store a cache_slot pointer in each thunk, saving 8 bytes per
-    thunk (24 bytes for N=3) plus removing the iids_ pointer and separate cache array.
 
-    Total per-instance cost for N=3: 8 + 3*32 = 104 bytes
+    Total per-instance cost for N=3: 16 + 3*24 = 88 bytes.
 
     Each InterfaceThunk masquerades as a COM object: its first field is a vtable pointer into
     a shared table of 256 MASM-generated stubs (thunk_stubs.asm). Each stub is 10 bytes:
@@ -41,8 +41,9 @@
 
     On first call through any method on a thunked interface, resolve() fires:
         1. Atomic-loads the cache slot (at this - 8); if already replaced, returns the real pointer.
-        2. QIs the default interface for the target IID.
-        3. compare_exchange_strong to swap the thunk pointer for the real one.
+        2. Unpacks owner_tagged to get the header pointer and pair index.
+        3. QIs the default interface (from header) for the target IID (from header's iid_table).
+        4. compare_exchange_strong to swap the thunk pointer for the real one.
            If another thread won the race, releases the duplicate and returns the winner.
 
     After resolution, the cache slot holds the real COM pointer and all subsequent calls
@@ -67,17 +68,28 @@ namespace generic_mutating
     using winrt::Windows::Storage::Streams::IInputStream;
     using winrt::Windows::Storage::Streams::IOutputStream;
 
+    // Non-templated header at the start of every ThunkedRuntimeClass instance.
+    // alignas(16) gives 4 tag bits in tagged mode (bit 0 = flag, bits 1-3 = index).
+    struct alignas(16) ThunkedRuntimeClassHeader
+    {
+        winrt::guid const* const* iid_table{};
+        mutable std::atomic<void*> default_cache{};
+    };
+
     // The thunk object layout — masquerades as a COM interface pointer.
     // vtable is first so &InterfaceThunk looks like a COM object to any caller.
-    // The cache slot is always located at (this - 8) by layout convention.
+    //
+    // payload encoding (discriminated by bit 0):
+    //   Tagged (bit 0 = 1): header_ptr | (index << 1) | 1.  Header is 16-byte aligned.
+    //   Full   (bit 0 = 0): (uintptr_t)default_abi.  COM pointers are 8-byte aligned.
+    //                        iid follows at this+16 in the enclosing CacheAndThunkFull.
     struct InterfaceThunk
     {
         void const* const* vtable;
-        void* default_abi;
-        winrt::guid const* iid;
+        uintptr_t payload;
 
-        // Returns a pointer to the cache slot, which is always the 8 bytes
-        // immediately before this thunk in memory (CacheAndThunk layout).
+        // The cache slot is always the 8 bytes immediately before this thunk
+        // in memory (CacheAndThunk layout guarantees this).
         std::atomic<void*>* cache_slot() const
         {
             return reinterpret_cast<std::atomic<void*>*>(
@@ -91,6 +103,24 @@ namespace generic_mutating
             if (current != static_cast<void const*>(this))
                 return current;
 
+            void* default_abi;
+            winrt::guid const* iid;
+
+            if (payload & 1)
+            {
+                // Tagged mode: header pointer in upper bits, index in bits 1-3
+                auto* hdr = reinterpret_cast<ThunkedRuntimeClassHeader*>(payload & ~uintptr_t(0xF));
+                default_abi = hdr->default_cache.load(std::memory_order_relaxed);
+                iid = hdr->iid_table[(payload >> 1) & 7];
+            }
+            else
+            {
+                // Full mode: payload is default_abi, iid follows thunk in memory
+                default_abi = reinterpret_cast<void*>(payload);
+                iid = *reinterpret_cast<winrt::guid const* const*>(
+                    reinterpret_cast<char const*>(this) + sizeof(InterfaceThunk));
+            }
+
             void* real = nullptr;
             winrt::check_hresult(static_cast<::IUnknown*>(default_abi)->QueryInterface(*iid, &real));
 
@@ -103,6 +133,7 @@ namespace generic_mutating
             return real;
         }
     };
+    static_assert(sizeof(InterfaceThunk) == 16);
 
     // Called from the ASM thunk stubs.
     extern "C" void* generic_mutating_resolve_thunk(InterfaceThunk const* thunk);
@@ -111,25 +142,46 @@ namespace generic_mutating
     inline constexpr size_t kMaxVtableSlots = 256;
     extern "C" const void* generic_mutating_thunk_vtable[kMaxVtableSlots];
 
-    // A cache slot paired with its thunk. The cache slot is always immediately
-    // before the thunk, so the thunk can find it at (this - 8).
-    struct CacheAndThunk
+    // Tagged pair: compact 24 bytes. Used when N <= 8.
+    struct CacheAndThunkTagged
     {
         mutable std::atomic<void*> cache{};
         mutable InterfaceThunk thunk{};
     };
-    static_assert(offsetof(CacheAndThunk, thunk) == sizeof(std::atomic<void*>));
+    static_assert(sizeof(CacheAndThunkTagged) == 24);
+    static_assert(offsetof(CacheAndThunkTagged, thunk) == sizeof(std::atomic<void*>));
 
-    inline void init_pair(CacheAndThunk& p, void* default_abi, winrt::guid const* iid)
+    // Full pair: 32 bytes with explicit iid. Used when N > 8.
+    // The iid field is at thunk + sizeof(InterfaceThunk), so resolve() finds it at this+16.
+    struct CacheAndThunkFull
+    {
+        mutable std::atomic<void*> cache{};
+        mutable InterfaceThunk thunk{};
+        mutable winrt::guid const* iid{};
+    };
+    static_assert(sizeof(CacheAndThunkFull) == 32);
+    static_assert(offsetof(CacheAndThunkFull, thunk) == sizeof(std::atomic<void*>));
+    static_assert(offsetof(CacheAndThunkFull, iid) == offsetof(CacheAndThunkFull, thunk) + sizeof(InterfaceThunk));
+
+    inline void init_pair_tagged(CacheAndThunkTagged& p, size_t index, ThunkedRuntimeClassHeader* header)
     {
         p.cache.store(&p.thunk, std::memory_order_relaxed);
         p.thunk.vtable = reinterpret_cast<void const* const*>(generic_mutating_thunk_vtable);
-        p.thunk.default_abi = default_abi;
-        p.thunk.iid = iid;
+        p.thunk.payload = reinterpret_cast<uintptr_t>(header) | (index << 1) | 1;
     }
 
+    inline void init_pair_full(CacheAndThunkFull& p, void* default_abi, winrt::guid const* iid)
+    {
+        p.cache.store(&p.thunk, std::memory_order_relaxed);
+        p.thunk.vtable = reinterpret_cast<void const* const*>(generic_mutating_thunk_vtable);
+        p.thunk.payload = reinterpret_cast<uintptr_t>(default_abi);
+        p.iid = iid;
+    }
+
+    // Compile-time pair type selection.
+    template<bool Tagged> using CacheAndThunkT = std::conditional_t<Tagged, CacheAndThunkTagged, CacheAndThunkFull>;
+
     // index_of_type takes a type and a variadic list of types and returns the index of the first type that matches.
-    // If the type is not found, the index returned is sizeof...(Types), so it's important to check that the result is less than sizeof...(Types) before using it.
     template<typename T, typename... Types>
     struct type_index;
 
@@ -139,91 +191,124 @@ namespace generic_mutating
     template<typename T, typename U, typename... Types>
     struct type_index<T, U, Types...> : std::integral_constant<size_t, 1 + type_index<T, Types...>::value> {};
 
-    // Base type for thunked runtime classes. N is the number of secondary (non-default) interfaces.
-    // default_cache holds the default interface; pairs[0..N-1] each hold a cache slot + thunk.
-    template<typename IDefault, typename... I>
-    struct ThunkedRuntimeClass
+    // Non-template base class that implements all COM lifecycle operations.
+    // Works on any pair layout via (pointer, count, stride) iteration.
+    // Both CacheAndThunkTagged and CacheAndThunkFull start with {atomic<void*>, InterfaceThunk},
+    // so the cache is at offset 0 and the thunk is at offset 8 within each pair.
+    struct ThunkedRuntimeClassBase : ThunkedRuntimeClassHeader
     {
-        inline static const std::array<winrt::guid const*, sizeof...(I)> iids{ &winrt::guid_of<I>()... };
-        mutable std::atomic<void*> default_cache{};
-        mutable std::array<CacheAndThunk, sizeof...(I)> pairs{};
-
     protected:
-        ThunkedRuntimeClass(void* default_abi)
-        {
-            attach(default_abi, iids);
-        }
-
-        ThunkedRuntimeClass() = default;
-
-        void attach(void* default_abi, std::span<winrt::guid const* const> iids)
-        {
-            default_cache.store(default_abi, std::memory_order_relaxed);
-            for (size_t i = 0; i < iids.size(); ++i)
-                init_pair(pairs[i], default_abi, iids[i]);
-        }
-
-        void clear()
+        // Releases default_cache and all resolved secondary interfaces.
+        __declspec(noinline) void clear_impl(void* pairs_begin, size_t count, size_t stride)
         {
             if (auto p = default_cache.exchange(nullptr, std::memory_order_acquire))
                 static_cast<::IUnknown*>(p)->Release();
-            for (auto& slot : pairs)
+
+            auto* base = static_cast<char*>(pairs_begin);
+            for (size_t i = 0; i < count; ++i, base += stride)
             {
-                auto p = slot.cache.exchange(nullptr, std::memory_order_acquire);
-                if (p && p != &slot.thunk)
+                auto& cache = *reinterpret_cast<std::atomic<void*>*>(base);
+                auto* thunk = reinterpret_cast<InterfaceThunk*>(base + sizeof(std::atomic<void*>));
+                auto p = cache.exchange(nullptr, std::memory_order_acquire);
+                if (p && p != thunk)
                     static_cast<::IUnknown*>(p)->Release();
             }
         }
 
-    public:
-        ~ThunkedRuntimeClass() { clear(); }
+        // Stores default_abi and initializes all pairs.
+        __declspec(noinline) void attach_impl(void* default_abi, void* pairs_begin, size_t count, size_t stride, bool tagged)
+        {
+            default_cache.store(default_abi, std::memory_order_relaxed);
+            auto* base = static_cast<char*>(pairs_begin);
+            if (tagged)
+            {
+                for (size_t i = 0; i < count; ++i, base += stride)
+                    init_pair_tagged(*reinterpret_cast<CacheAndThunkTagged*>(base), i, this);
+            }
+            else
+            {
+                for (size_t i = 0; i < count; ++i, base += stride)
+                    init_pair_full(*reinterpret_cast<CacheAndThunkFull*>(base), default_abi, iid_table[i]);
+            }
+        }
 
-        // Copy/move require iids from the derived class.
-        // Derived types must supply them via a static constexpr iids array.
-        ThunkedRuntimeClass(ThunkedRuntimeClass const& other)
+        // Copy from other: AddRef + attach.
+        __declspec(noinline) void copy_from(ThunkedRuntimeClassBase const& other, void* pairs_begin, size_t count, size_t stride, bool tagged)
         {
             if (auto p = other.default_cache.load(std::memory_order_relaxed))
             {
                 static_cast<::IUnknown*>(p)->AddRef();
-                attach(p, iids);
+                attach_impl(p, pairs_begin, count, stride, tagged);
             }
         }
 
-        ThunkedRuntimeClass(ThunkedRuntimeClass&& other) noexcept
+        // Move from other: steal default + attach, then clear other.
+        __declspec(noinline) void move_from(ThunkedRuntimeClassBase& other, void* my_pairs, void* other_pairs, size_t count, size_t stride, bool tagged)
         {
             auto p = other.default_cache.exchange(nullptr, std::memory_order_acquire);
-            if (p) attach(p, iids);
-            other.clear();
+            if (p) attach_impl(p, my_pairs, count, stride, tagged);
+            other.clear_impl(other_pairs, count, stride);
         }
 
-        ThunkedRuntimeClass& assign_copy(ThunkedRuntimeClass const& other)
+        // Copy-assign from other.
+        __declspec(noinline) void assign_copy_impl(ThunkedRuntimeClassBase const& other, void* pairs_begin, size_t count, size_t stride, bool tagged)
         {
             if (this != &other)
             {
-                clear();
-                if (auto p = other.default_cache.load(std::memory_order_relaxed))
-                {
-                    static_cast<::IUnknown*>(p)->AddRef();
-                    attach(p, iids);
-                }
+                clear_impl(pairs_begin, count, stride);
+                copy_from(other, pairs_begin, count, stride, tagged);
             }
-            return *this;
         }
 
-        ThunkedRuntimeClass& assign_move(ThunkedRuntimeClass&& other) noexcept
+        // Move-assign from other.
+        __declspec(noinline) void assign_move_impl(ThunkedRuntimeClassBase& other, void* my_pairs, void* other_pairs, size_t count, size_t stride, bool tagged)
         {
             if (this != &other)
             {
-                clear();
-                auto p = other.default_cache.exchange(nullptr, std::memory_order_acquire);
-                if (p) attach(p, iids);
-                other.clear();
+                clear_impl(my_pairs, count, stride);
+                move_from(other, my_pairs, other_pairs, count, stride, tagged);
             }
-            return *this;
         }
 
-        template<typename Q> auto as() const { return reinterpret_cast<IDefault const*>(&default_cache)->as<Q>(); }
-        template<typename Q> auto try_as() const { return reinterpret_cast<IDefault const*>(&default_cache)->try_as<Q>(); }
+        template<typename Q> auto as() const { return reinterpret_cast<winrt::Windows::Foundation::IInspectable const*>(&default_cache)->as<Q>(); }
+        template<typename Q> auto try_as() const { return reinterpret_cast<winrt::Windows::Foundation::IInspectable const*>(&default_cache)->try_as<Q>(); }
+
+        explicit operator bool() const noexcept
+        {
+            return default_cache.load(std::memory_order_relaxed) != nullptr;
+        }
+    };
+
+    // Typed template that adds interface accessors on top of the non-template base.
+    // All COM lifecycle operations dispatch to ThunkedRuntimeClassBase, so the compiler
+    // generates only one copy regardless of how many ThunkedRuntimeClass instantiations exist.
+    template<typename IDefault, typename... I>
+    struct ThunkedRuntimeClass : ThunkedRuntimeClassBase
+    {
+        static constexpr size_t N = sizeof...(I);
+        static constexpr bool use_tagged = N <= 8;
+        using PairType = CacheAndThunkT<use_tagged>;
+        static constexpr size_t pair_stride = sizeof(PairType);
+
+        inline static const std::array<winrt::guid const*, N> iids{ &winrt::guid_of<I>()... };
+        mutable std::array<PairType, N> pairs{};
+
+    protected:
+        ThunkedRuntimeClass(void* default_abi) { iid_table = iids.data(); attach_impl(default_abi, pairs.data(), N, pair_stride, use_tagged); }
+        ThunkedRuntimeClass() { iid_table = iids.data(); }
+        void clear() { clear_impl(pairs.data(), N, pair_stride); }
+
+    public:
+        ~ThunkedRuntimeClass() { clear(); }
+        ThunkedRuntimeClass(ThunkedRuntimeClass const& other) { iid_table = iids.data(); copy_from(other, pairs.data(), N, pair_stride, use_tagged); }
+        ThunkedRuntimeClass(ThunkedRuntimeClass&& other) noexcept { iid_table = iids.data(); move_from(other, pairs.data(), other.pairs.data(), N, pair_stride, use_tagged); }
+        void assign_copy(ThunkedRuntimeClass const& other) { assign_copy_impl(other, pairs.data(), N, pair_stride, use_tagged); }
+        void assign_move(ThunkedRuntimeClass&& other) noexcept { assign_move_impl(other, pairs.data(), other.pairs.data(), N, pair_stride, use_tagged); }
+
+        using ThunkedRuntimeClassBase::operator bool;
+        using ThunkedRuntimeClassBase::as;
+        using ThunkedRuntimeClassBase::try_as;
+
         operator IDefault const&() const { return *reinterpret_cast<IDefault const*>(&default_cache); }
 
         template<typename T>
@@ -238,11 +323,6 @@ namespace generic_mutating
             {
                 return *reinterpret_cast<T const*>(&pairs[iface_index].cache);
             }
-        }
-
-        explicit operator bool() const noexcept
-        {
-            return default_cache.load(std::memory_order_relaxed) != nullptr;
         }
     };
 

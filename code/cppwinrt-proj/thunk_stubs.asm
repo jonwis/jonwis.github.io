@@ -10,8 +10,9 @@
 ; InterfaceThunk layout (must match C++ struct):
 ;   [-8]  cache_slot (atomic<void*>, in CacheAndThunk before the thunk)
 ;   [+0]  vtable pointer (void const* const*)
-;   [+8]  default_abi (void*)
-;   [+16] iid (GUID const*)
+;   [+8]  payload (uintptr_t):
+;         Tagged (bit 0=1): ThunkedRuntimeClassHeader* | (index << 1) | 1
+;         Full   (bit 0=0): default_abi, with iid at [+16]
 ;
 ; Total binary size: 256 * 10 + ~100 = ~2660 bytes (vs ~20KB for template approach)
 
