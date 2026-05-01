@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="BinaryThumbprint.Cli/BinaryThumbprint.Cli.csproj" />
+  <Project Path="BinaryThumbprint.Tests/BinaryThumbprint.Tests.csproj" />
+  <Project Path="BinaryThumbprint/BinaryThumbprint.csproj" />
+</Solution>
