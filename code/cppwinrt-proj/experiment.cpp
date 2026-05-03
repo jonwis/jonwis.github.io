@@ -642,15 +642,13 @@ void thunk_test();
 int main()
 {
     winrt::init_apartment();
-    // auto v1 = create_and_view_thunked();
-    // auto v2 = create_and_view_cppwinrt();
-    // std::wcout << L"Thunked view size: " << v1.Size() << L", CppWinRT view size: " << v2.Size() << std::endl;
-    // comparison<use_cached_directly::PropertySet>();
-    // comparison<cppwinrt_cheese::PropertySet>();
-    // comparison<virtual_wrapper::PropertySet>();
-    // comparison<another_attempt::PropertySet>();
-    // comparison<generic_mutating::PropertySet>();
-    // comparison<winrt::Windows::Foundation::Collections::PropertySet>();
+    // Run both comparison modes for side-by-side disassembly analysis:
+    // 1. generic_mutating::PropertySet — thunk-based caching (ASM stubs)
+    // 2. winrt::...::PropertySet — require_one cache (if built with updated cppwinrt)
+    // std::wcout << L"=== generic_mutating::PropertySet (thunk cache) ===" << std::endl;
+    // comparison<generic_mutating::PropertySet>(); // needs public conversion operators
+    std::wcout << L"=== winrt::PropertySet (require_one cache) ===" << std::endl;
+    comparison<winrt::Windows::Foundation::Collections::PropertySet>();
     thunk_test();
 }
 

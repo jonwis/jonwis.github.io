@@ -1,3 +1,4 @@
+cmake_minimum_required(VERSION 3.20)
 project(cppwinrt-proj LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -40,6 +41,13 @@ endif()
 
 target_sources(cppwinrt-proj PRIVATE thunk_tests.cpp)
 
-find_package(cppwinrt CONFIG REQUIRED)
-
-target_link_libraries(cppwinrt-proj PRIVATE Microsoft::CppWinRT OneCoreUAP)
+# Use custom cppwinrt headers if CPPWINRT_OUTPUT_DIR is set (e.g. from a local build of cppwinrt.exe).
+# Otherwise fall back to vcpkg's cppwinrt package.
+if(DEFINED CPPWINRT_OUTPUT_DIR)
+    message(STATUS "Using custom cppwinrt headers from: ${CPPWINRT_OUTPUT_DIR}")
+    target_include_directories(cppwinrt-proj PRIVATE ${CPPWINRT_OUTPUT_DIR})
+    target_link_libraries(cppwinrt-proj PRIVATE OneCoreUAP)
+else()
+    find_package(cppwinrt CONFIG REQUIRED)
+    target_link_libraries(cppwinrt-proj PRIVATE Microsoft::CppWinRT OneCoreUAP)
+endif()
