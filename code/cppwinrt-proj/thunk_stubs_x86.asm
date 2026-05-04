@@ -17,7 +17,7 @@
 .686
 .model flat, c
 
-extern generic_mutating_resolve_thunk:proc
+extern winrt_fast_resolve_thunk:proc
 
 .code
 
@@ -34,7 +34,7 @@ common_thunk_dispatch proc
     push    dword ptr [esp+8]       ; push 'this' (InterfaceThunk*) as arg for resolve
     ; Stack: [esp]=this [esp+4]=slot [esp+8]=ret_addr [esp+0C]=this [esp+10]=arg1 ...
 
-    call    generic_mutating_resolve_thunk  ; cdecl, returns real ptr in eax
+    call    winrt_fast_resolve_thunk  ; cdecl, returns real ptr in eax
     add     esp, 4                  ; clean cdecl arg
     ; Stack: [esp]=slot [esp+4]=ret_addr [esp+8]=this [esp+0C]=arg1 ...
 
@@ -51,10 +51,10 @@ common_thunk_dispatch endp
 ; ============================================================================
 thunk_stub macro idx
     align 2
-    generic_mutating_thunk_stub_&idx& proc
+    winrt::fast_thunk_stub_&idx& proc
         mov     eax, idx
         jmp     common_thunk_dispatch
-    generic_mutating_thunk_stub_&idx& endp
+    winrt::fast_thunk_stub_&idx& endp
 endm
 
 ; ============================================================================
@@ -72,11 +72,11 @@ endm
 .data
 
 vtable_entry macro idx
-    dd generic_mutating_thunk_stub_&idx&
+    dd winrt::fast_thunk_stub_&idx&
 endm
 
-public generic_mutating_thunk_vtable
-generic_mutating_thunk_vtable label dword
+public winrt::fast_thunk_vtable
+winrt::fast_thunk_vtable label dword
 
 counter2 = 0
 rept 256

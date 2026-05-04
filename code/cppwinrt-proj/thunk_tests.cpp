@@ -5,7 +5,8 @@
 #include <cassert>
 #include "thunk_experiment.h"
 
-using namespace generic_mutating;
+using namespace winrt::Windows::Foundation;
+using namespace winrt::Windows::Foundation::Collections;
 
 // ============================================================================
 // Test helpers
@@ -36,7 +37,7 @@ static std::vector<TestEntry> tests;
 
 TEST(PropertySet_BasicOperations)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     CHECK(ps);
     CHECK(ps.Size() == 0);
 
@@ -61,7 +62,7 @@ TEST(PropertySet_BasicOperations)
 
 TEST(PropertySet_Iteration)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     ps.Insert(L"a", winrt::box_value(1));
     ps.Insert(L"b", winrt::box_value(2));
     ps.Insert(L"c", winrt::box_value(3));
@@ -78,16 +79,16 @@ TEST(PropertySet_Iteration)
 
 TEST(PropertySet_NullState)
 {
-    PropertySet ps(nullptr);
+    fast::PropertySet ps(nullptr);
     CHECK(!ps);
 }
 
 TEST(PropertySet_CopyConstruct)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     ps.Insert(L"x", winrt::box_value(99));
 
-    PropertySet copy(ps);
+    fast::PropertySet copy(ps);
     CHECK(copy);
     CHECK(copy.Size() == 1);
     CHECK(copy.HasKey(L"x"));
@@ -99,10 +100,10 @@ TEST(PropertySet_CopyConstruct)
 
 TEST(PropertySet_MoveConstruct)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     ps.Insert(L"m", winrt::box_value(7));
 
-    PropertySet moved(std::move(ps));
+    fast::PropertySet moved(std::move(ps));
     CHECK(moved);
     CHECK(moved.Size() == 1);
     CHECK(moved.HasKey(L"m"));
@@ -111,10 +112,10 @@ TEST(PropertySet_MoveConstruct)
 
 TEST(PropertySet_CopyAssign)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     ps.Insert(L"a", winrt::box_value(1));
 
-    PropertySet other;
+    fast::PropertySet other;
     other = ps;
     CHECK(other);
     CHECK(other.Size() == 1);
@@ -122,10 +123,10 @@ TEST(PropertySet_CopyAssign)
 
 TEST(PropertySet_MoveAssign)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     ps.Insert(L"a", winrt::box_value(1));
 
-    PropertySet other;
+    fast::PropertySet other;
     other = std::move(ps);
     CHECK(other);
     CHECK(other.Size() == 1);
@@ -134,7 +135,7 @@ TEST(PropertySet_MoveAssign)
 
 TEST(PropertySet_SelfAssign)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     ps.Insert(L"s", winrt::box_value(5));
     auto& ref = ps;
     ps = ref; // self-assign
@@ -143,7 +144,7 @@ TEST(PropertySet_SelfAssign)
 }
 
 // Pass by const ref — thunks should resolve lazily
-void use_propertyset_by_constref(PropertySet const& ps, uint32_t expected_size)
+void use_propertyset_by_constref(fast::PropertySet const& ps, uint32_t expected_size)
 {
     CHECK(ps.Size() == expected_size);
     auto view = ps.GetView();
@@ -152,13 +153,13 @@ void use_propertyset_by_constref(PropertySet const& ps, uint32_t expected_size)
 
 TEST(PropertySet_PassByConstRef)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     ps.Insert(L"k", winrt::box_value(1));
     use_propertyset_by_constref(ps, 1);
 }
 
 // Pass by value — triggers copy, thunks reset
-void use_propertyset_by_value(PropertySet ps, uint32_t expected_size)
+void use_propertyset_by_value(fast::PropertySet ps, uint32_t expected_size)
 {
     CHECK(ps.Size() == expected_size);
     ps.Insert(L"local_only", winrt::box_value(0));
@@ -166,7 +167,7 @@ void use_propertyset_by_value(PropertySet ps, uint32_t expected_size)
 
 TEST(PropertySet_PassByValue)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     ps.Insert(L"k", winrt::box_value(1));
     use_propertyset_by_value(ps, 1);
     // "local_only" was added through the copy's thunk to the same COM object
@@ -175,7 +176,7 @@ TEST(PropertySet_PassByValue)
 
 TEST(PropertySet_AsAndTryAs)
 {
-    PropertySet ps;
+    fast::PropertySet ps;
     auto inspectable = ps.as<IInspectable>();
     CHECK(inspectable != nullptr);
 
@@ -187,117 +188,13 @@ TEST(PropertySet_AsAndTryAs)
 }
 
 // ============================================================================
-// InMemoryRandomAccessStream tests
-// ============================================================================
-
-TEST(IMRAS_BasicOperations)
-{
-    InMemoryRandomAccessStream stream;
-    CHECK(stream);
-    CHECK(stream.Size() == 0);
-    CHECK(stream.Position() == 0);
-    CHECK(stream.CanRead());
-    CHECK(stream.CanWrite());
-}
-
-TEST(IMRAS_NullState)
-{
-    InMemoryRandomAccessStream stream(nullptr);
-    CHECK(!stream);
-}
-
-TEST(IMRAS_CopyAndMove)
-{
-    InMemoryRandomAccessStream stream;
-    stream.Size(1024);
-    CHECK(stream.Size() == 1024);
-
-    InMemoryRandomAccessStream copy(stream);
-    CHECK(copy);
-    CHECK(copy.Size() == 1024);
-
-    InMemoryRandomAccessStream moved(std::move(stream));
-    CHECK(moved);
-    CHECK(moved.Size() == 1024);
-    CHECK(!stream);
-}
-
-TEST(IMRAS_SeekAndPosition)
-{
-    InMemoryRandomAccessStream stream;
-    stream.Size(4096);
-    stream.Seek(100);
-    CHECK(stream.Position() == 100);
-    stream.Seek(0);
-    CHECK(stream.Position() == 0);
-}
-
-TEST(IMRAS_CloneStream)
-{
-    InMemoryRandomAccessStream stream;
-    stream.Size(512);
-    auto clone = stream.CloneStream();
-    CHECK(clone != nullptr);
-    CHECK(clone.Size() == 512);
-}
-
-TEST(IMRAS_GetSubStreams)
-{
-    InMemoryRandomAccessStream stream;
-    auto input = stream.GetInputStreamAt(0);
-    CHECK(input != nullptr);
-    auto output = stream.GetOutputStreamAt(0);
-    CHECK(output != nullptr);
-}
-
-TEST(IMRAS_Close)
-{
-    InMemoryRandomAccessStream stream;
-    stream.Close(); // should not throw
-    CHECK(true);
-}
-
-TEST(IMRAS_FlushAsync)
-{
-    InMemoryRandomAccessStream stream;
-    auto op = stream.FlushAsync();
-    auto result = op.get();
-    CHECK(true); // didn't throw
-}
-
-void use_stream_by_constref(InMemoryRandomAccessStream const& s)
-{
-    CHECK(s.CanRead());
-    CHECK(s.CanWrite());
-}
-
-TEST(IMRAS_PassByConstRef)
-{
-    InMemoryRandomAccessStream stream;
-    use_stream_by_constref(stream);
-}
-
-void use_stream_by_value(InMemoryRandomAccessStream s)
-{
-    CHECK(s.CanRead());
-    s.Size(999);
-}
-
-TEST(IMRAS_PassByValue)
-{
-    InMemoryRandomAccessStream stream;
-    use_stream_by_value(stream);
-    CHECK(stream.Size() == 999); // same COM object
-}
-
-// ============================================================================
 // Thread safety tests
 // ============================================================================
 
 TEST(PropertySet_ConcurrentResolve)
 {
     // Multiple threads race to resolve thunked interfaces on the same object.
-    PropertySet ps;
+    fast::PropertySet ps;
     ps.Insert(L"init", winrt::box_value(0));
 
     constexpr int kThreads = 8;
@@ -331,46 +228,10 @@ TEST(PropertySet_ConcurrentResolve)
     CHECK(errors.load() == 0);
 }
 
-TEST(IMRAS_ConcurrentResolve)
-{
-    InMemoryRandomAccessStream stream;
-    stream.Size(4096);
-
-    constexpr int kThreads = 8;
-    constexpr int kIterations = 1000;
-    std::atomic<int> errors{0};
-
-    std::vector<std::thread> threads;
-    for (int t = 0; t < kThreads; ++t)
-    {
-        threads.emplace_back([&stream, &errors]() {
-            for (int i = 0; i < kIterations; ++i)
-            {
-                try {
-                    auto sz = stream.Size();
-                    if (sz != 4096) errors++;
-
-                    auto canRead = stream.CanRead();
-                    if (!canRead) errors++;
-
-                    auto canWrite = stream.CanWrite();
-                    if (!canWrite) errors++;
-                }
-                catch (...) {
-                    errors++;
-                }
-            }
-        });
-    }
-
-    for (auto& t : threads) t.join();
-    CHECK(errors.load() == 0);
-}
-
 TEST(PropertySet_ConcurrentCopyAndUse)
 {
     // Copies made while other threads are resolving interfaces
-    PropertySet ps;
+    fast::PropertySet ps;
     for (int i = 0; i < 10; ++i)
         ps.Insert(winrt::to_hstring(i), winrt::box_value(i));
 
@@ -384,7 +245,7 @@ TEST(PropertySet_ConcurrentCopyAndUse)
             for (int i = 0; i < 500; ++i)
             {
                 try {
-                    PropertySet local(ps); // copy
+                    fast::PropertySet local(ps); // copy
                     auto sz = local.Size();
                     if (sz < 10) errors++;
 

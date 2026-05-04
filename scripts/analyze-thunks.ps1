@@ -23,7 +23,7 @@ $thunkSymbols = @(
     "create_and_view_thunked"
     "create_and_view_cppwinrt"
     "thunk_test"
-    "generic_mutating"
+    "winrt::fast"
     "InterfaceThunk"
     "ThunkedRuntimeClass"
     "PropertySet"
@@ -112,7 +112,7 @@ if ($currentFunc -and $currentLines -gt 0) {
 $categories = [ordered]@{
     "Thunk Infrastructure" = @("resolve", "init_thunk", "InterfaceThunk", "resolve_thunk")
     "ThunkedRuntimeClass"  = @("ThunkedRuntimeClass", "attach", "clear")
-    "PropertySet (thunked)"= @("generic_mutating.*PropertySet", "create_and_view_thunked")
+    "PropertySet (thunked)"= @("winrt::fast.*PropertySet", "create_and_view_thunked")
     "PropertySet (cppwinrt)"= @("create_and_view_cppwinrt")
     "Comparison"           = @("comparison")
 }

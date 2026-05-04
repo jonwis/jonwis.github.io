@@ -3,7 +3,7 @@
 ## Summary
 
 Change the **default projection** of WinRT runtimeclasses so they use the thunk-based
-interface caching system from `generic_mutating`. Instead of `PropertySet` being `sizeof(void*)`
+interface caching system from `winrt::fast::impl`. Instead of `PropertySet` being `sizeof(void*)`
 wrapping the default interface pointer, it becomes a larger type with:
 - A `runtimeclass_header` containing the default interface pointer
 - Per-secondary-interface cache+thunk pairs that lazily QI on first use
@@ -12,6 +12,10 @@ The runtimeclass exposes a `get_default()` method returning a reference to the d
 interface, and all ABI interop flows through that. Functions accepting runtimeclass-typed
 parameters marshal them via `winrt::get_abi(v)` which calls `v.get_default()` to extract
 the ABI-safe default interface pointer.
+
+The thunk infrastructure lives in `winrt::fast::impl`, while projected thunked types
+mirror the standard WinRT namespace hierarchy under a `fast` sub-namespace
+(e.g. `winrt::Windows::Foundation::Collections::fast::PropertySet`).
 
 ---
 
@@ -286,24 +290,24 @@ the class is cleaner and every method call is guaranteed to use the cached path.
 
 #### 1.1 — `base_fast_abi.h` (new file in `strings/`)
 
-Contains (in `winrt::impl` namespace):
-- `runtimeclass_header` (16 bytes, `alignas(16)`)
+Contains (in `winrt::fast::impl` namespace):
+- `ThunkedRuntimeClassHeader` (16 bytes, `alignas(16)`)
 - `InterfaceThunk` (16 bytes) with `resolve()` logic
 - `CacheAndThunkTagged` / `CacheAndThunkFull` pair types
 - `init_pair_tagged()` / `init_pair_full()` helpers
-- `runtimeclass_cache_base` with `clear_impl`, `attach_impl`, `copy_from`, `move_from`
-- `runtimeclass_base<IDefault, I...>` typed template
+- `ThunkedRuntimeClass` base with `clear_impl`, `attach_impl`, `copy_from`, `move_from`
+- `ThunkedRuntimeClass<IDefault, I...>` typed template
 - `type_index<T, Types...>` helper
-- `extern "C"` declarations for resolve and vtable
+- `extern "C"` declarations for `winrt_fast_resolve_thunk` and `winrt_fast_thunk_vtable`
 
 #### 1.2 — Assembly stubs (new files)
 
 | File | Architecture | Shared cost |
 |------|-------------|-------------|
-| `strings/fast_abi/thunk_stubs_x64.asm` | x64 | ~4.7 KB |
-| `strings/fast_abi/thunk_stubs_x86.asm` | x86 | ~2.9 KB |
-| `strings/fast_abi/thunk_stubs_arm64.asm` | ARM64 | ~4.2 KB |
-| `strings/fast_abi/thunk_stubs_arm64ec.asm` | ARM64EC | ~4.2 KB |
+| `strings/fast_abi/thunk_stubs_x64.asm` | x64 (`winrt_fast_thunk_stub_*`) | ~4.7 KB |
+| `strings/fast_abi/thunk_stubs_x86.asm` | x86 (`winrt_fast_thunk_stub_*`) | ~2.9 KB |
+| `strings/fast_abi/thunk_stubs_arm64.asm` | ARM64 (`winrt_fast_thunk_stub_*`) | ~4.2 KB |
+| `strings/fast_abi/thunk_stubs_arm64ec.asm` | ARM64EC (`winrt_fast_thunk_stub_*`) | ~4.2 KB |
 
 #### 1.3 — Build system & base header integration
 
@@ -327,10 +331,11 @@ Contains (in `winrt::impl` namespace):
 #### 3.1 — `write_Cached_class()` (new function in code_writers.h)
 
 Replaces `write_slow_class()` for runtimeclasses. Generates:
-- Inheritance from `runtimeclass_base<IDefault, I...>` (no `require<>`)
+- Inheritance from `winrt::fast::impl::ThunkedRuntimeClass<IDefault, I...>` (no `require<>`)
 - `get_default()` method
 - Explicit forwarding methods for all interface methods
 - Constructors (nullptr, take_ownership_from_abi, activation)
+- A `base_t` alias for the ThunkedRuntimeClass specialization
 
 #### 3.2 — `write_class_abi_overloads()` (new function in code_writers.h)
 
@@ -422,6 +427,12 @@ Tests: cached dispatch, copy/move, conversions, thread safety, >8 interfaces, AB
 | `cppwinrt/code_writers.h` | New `write_thunked_class()`, `write_class_abi_overloads()`. NO change to `write_abi_args`. |
 | `cppwinrt/file_writers.h` | Include `base_fast_abi.h`. Call `write_thunked_class()` instead of `write_slow_class()`. |
 | `CMakeLists.txt` | New `cppwinrt_fast_abi` library target |
+
+### Removed
+
+| Item | Reason |
+|------|--------|
+| `InMemoryRandomAccessStream` thunked type | Removed to focus prototype on collection types (PropertySet). Stream types can be added later. |
 
 ### Unchanged
 

@@ -4,6 +4,8 @@ project(JonWisCodeSamples VERSION 0.1.0 LANGUAGES C CXX)
 find_package(frozen CONFIG REQUIRED)
 find_package(wil CONFIG REQUIRED)
 
+enable_testing()
+
 add_subdirectory(code/Formatter)
 add_subdirectory(code/MemMapLargePages)
 add_subdirectory(code/DllPathBinding)

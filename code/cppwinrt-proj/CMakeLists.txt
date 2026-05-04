@@ -39,7 +39,12 @@ else()
     add_executable(cppwinrt-proj experiment.cpp ${THUNK_ASM_SOURCE})
 endif()
 
-target_sources(cppwinrt-proj PRIVATE thunk_tests.cpp)
+target_sources(cppwinrt-proj PRIVATE
+    thunk_tests.cpp
+    self_replacing.cpp
+    cached_types.cpp
+    cppwinrt_replicant.cpp
+    experiment.cpp)
 
 # Use custom cppwinrt headers if CPPWINRT_OUTPUT_DIR is set (e.g. from a local build of cppwinrt.exe).
 # Otherwise fall back to vcpkg's cppwinrt package.
@@ -51,3 +56,5 @@ else()
     find_package(cppwinrt CONFIG REQUIRED)
     target_link_libraries(cppwinrt-proj PRIVATE Microsoft::CppWinRT OneCoreUAP)
 endif()
+
+add_test(NAME cppwinrt-proj COMMAND cppwinrt-proj)

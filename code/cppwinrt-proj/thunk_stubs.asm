@@ -16,7 +16,7 @@
 ;
 ; Total binary size: 256 * 10 + ~100 = ~2660 bytes (vs ~20KB for template approach)
 
-extern generic_mutating_resolve_thunk:proc
+extern winrt_fast_resolve_thunk:proc
 
 _TEXT segment align(16)
 
@@ -34,7 +34,7 @@ common_thunk_dispatch proc
     sub     rsp, 20h            ; shadow space for resolve call
 
     ; rcx = InterfaceThunk* (already in place from the original call)
-    call    generic_mutating_resolve_thunk  ; returns real interface ptr in rax
+    call    winrt_fast_resolve_thunk  ; returns real interface ptr in rax
 
     add     rsp, 20h
     pop     r10                 ; r10 = slot index
@@ -60,10 +60,10 @@ common_thunk_dispatch endp
 ; ============================================================================
 thunk_stub macro idx
     align 2
-    generic_mutating_thunk_stub_&idx& proc
+    winrt_fast_thunk_stub_&idx& proc
         mov     eax, idx
         jmp     common_thunk_dispatch
-    generic_mutating_thunk_stub_&idx& endp
+    winrt_fast_thunk_stub_&idx& endp
 endm
 
 ; ============================================================================
@@ -79,17 +79,17 @@ _TEXT ends
 
 ; ============================================================================
 ; Read-only data: the vtable array of 256 stub pointers, exported as
-; generic_mutating_thunk_vtable for C++ to reference.
+; winrt_fast_thunk_vtable for C++ to reference.
 ; ============================================================================
 
 vtable_entry macro idx
-    dq generic_mutating_thunk_stub_&idx&
+    dq winrt_fast_thunk_stub_&idx&
 endm
 
 _DATA segment
 
-    public generic_mutating_thunk_vtable
-    generic_mutating_thunk_vtable label qword
+    public winrt_fast_thunk_vtable
+    winrt_fast_thunk_vtable label qword
 
     counter2 = 0
     rept 256

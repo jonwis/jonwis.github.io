@@ -36,7 +36,7 @@
         jmp common_thunk_dispatch
 
     The common dispatch function saves the caller's register args, calls
-    generic_mutating_resolve_thunk (the C++ resolve helper), loads the real vtable,
+    winrt_fast_resolve_thunk (the C++ resolve helper), loads the real vtable,
     indexes by the slot number in eax, and tail-jumps to the real method.
 
     On first call through any method on a thunked interface, resolve() fires:
@@ -53,21 +53,8 @@
     interfaces are re-QI'd lazily). Move steals the default interface and clears the source.
 */
 
-namespace generic_mutating
+namespace winrt::fast::impl
 {
-    using winrt::Windows::Foundation::Collections::IPropertySet;
-    using winrt::Windows::Foundation::Collections::IObservableMap;
-    using winrt::Windows::Foundation::Collections::IIterable;
-    using winrt::Windows::Foundation::Collections::IKeyValuePair;
-    using winrt::Windows::Foundation::Collections::IIterator;
-    using winrt::Windows::Foundation::Collections::IMap;
-    using winrt::Windows::Foundation::Collections::IMapView;
-    using winrt::Windows::Foundation::IInspectable;
-    using winrt::Windows::Foundation::IClosable;
-    using winrt::Windows::Storage::Streams::IRandomAccessStream;
-    using winrt::Windows::Storage::Streams::IInputStream;
-    using winrt::Windows::Storage::Streams::IOutputStream;
-
     // Non-templated header at the start of every ThunkedRuntimeClass instance.
     // alignas(16) gives 4 tag bits in tagged mode (bit 0 = flag, bits 1-3 = index).
     struct alignas(16) ThunkedRuntimeClassHeader
@@ -136,11 +123,11 @@ namespace generic_mutating
     static_assert(sizeof(InterfaceThunk) == 16);
 
     // Called from the ASM thunk stubs.
-    extern "C" void* generic_mutating_resolve_thunk(InterfaceThunk const* thunk);
+    extern "C" void* winrt_fast_resolve_thunk(InterfaceThunk const* thunk);
 
     // The thunk vtable: 256 entries defined in thunk_stubs.asm.
     inline constexpr size_t kMaxVtableSlots = 256;
-    extern "C" const void* generic_mutating_thunk_vtable[kMaxVtableSlots];
+    extern "C" const void* winrt_fast_thunk_vtable[kMaxVtableSlots];
 
     // Tagged pair: compact 24 bytes. Used when N <= 8.
     struct CacheAndThunkTagged
@@ -166,14 +153,14 @@ namespace generic_mutating
     inline void init_pair_tagged(CacheAndThunkTagged& p, size_t index, ThunkedRuntimeClassHeader* header)
     {
         p.cache.store(&p.thunk, std::memory_order_relaxed);
-        p.thunk.vtable = reinterpret_cast<void const* const*>(generic_mutating_thunk_vtable);
+        p.thunk.vtable = reinterpret_cast<void const* const*>(winrt_fast_thunk_vtable);
         p.thunk.payload = reinterpret_cast<uintptr_t>(header) | (index << 1) | 1;
     }
 
     inline void init_pair_full(CacheAndThunkFull& p, void* default_abi, winrt::guid const* iid)
     {
         p.cache.store(&p.thunk, std::memory_order_relaxed);
-        p.thunk.vtable = reinterpret_cast<void const* const*>(generic_mutating_thunk_vtable);
+        p.thunk.vtable = reinterpret_cast<void const* const*>(winrt_fast_thunk_vtable);
         p.thunk.payload = reinterpret_cast<uintptr_t>(default_abi);
         p.iid = iid;
     }
@@ -327,69 +314,56 @@ namespace generic_mutating
     };
 
     // ---- PropertySet built on the generic thunk system ----
+}
 
-    struct PropertySet : protected ThunkedRuntimeClass<IPropertySet, IMap<winrt::hstring, IInspectable>, IIterable<IKeyValuePair<winrt::hstring, IInspectable>>, IObservableMap<winrt::hstring, IInspectable>>
+namespace winrt::Windows::Foundation::Collections
+{
+    namespace fast
     {
-        PropertySet()
-            : PropertySet(winrt::detach_abi(winrt::Windows::Foundation::Collections::PropertySet{}), winrt::take_ownership_from_abi)
+        struct PropertySet : protected winrt::fast::impl::ThunkedRuntimeClass<
+            IPropertySet, 
+            IMap<winrt::hstring, IInspectable>,
+            IIterable<IKeyValuePair<winrt::hstring, IInspectable>>, 
+            IObservableMap<winrt::hstring, IInspectable>>
         {
-        }
+            using base_t = winrt::fast::impl::ThunkedRuntimeClass<
+                IPropertySet, 
+                IMap<winrt::hstring, IInspectable>,
+                IIterable<IKeyValuePair<winrt::hstring, IInspectable>>, 
+                IObservableMap<winrt::hstring, IInspectable>>;
+            PropertySet()
+                : PropertySet(winrt::detach_abi(winrt::Windows::Foundation::Collections::PropertySet{}), winrt::take_ownership_from_abi)
+            {
+            }
 
-        PropertySet(nullptr_t) : ThunkedRuntimeClass(nullptr) {}
-        PropertySet(void* p, winrt::take_ownership_from_abi_t) : ThunkedRuntimeClass(p) {}
-        PropertySet(PropertySet const& other) : ThunkedRuntimeClass(other) {}
-        PropertySet(PropertySet&& other) noexcept : ThunkedRuntimeClass(std::move(other)) {}
-        PropertySet& operator=(PropertySet const& other) { assign_copy(other); return *this; }
-        PropertySet& operator=(PropertySet&& other) noexcept { assign_move(std::move(other)); return *this; }
+            PropertySet(nullptr_t) : base_t(nullptr) {}
+            PropertySet(void* p, take_ownership_from_abi_t) : base_t(p) {}
+            PropertySet(PropertySet const& other) : base_t(other) {}
+            PropertySet(PropertySet&& other) noexcept : base_t(std::move(other)) {}
+            PropertySet& operator=(PropertySet const& other) { assign_copy(other); return *this; }
+            PropertySet& operator=(PropertySet&& other) noexcept { assign_move(std::move(other)); return *this; }
 
-        using ThunkedRuntimeClass::operator bool;
-        using ThunkedRuntimeClass::as;
-        using ThunkedRuntimeClass::try_as;
+            using base_t::operator bool;
+            using base_t::as;
+            using base_t::try_as;
 
-        auto First() const { return static_cast<IIterable<IKeyValuePair<winrt::hstring, IInspectable>> const&>(*this).First(); }
-        auto Size() const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Size(); }
-        auto Clear() const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Clear(); }
-        auto GetView() const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).GetView(); }
-        auto HasKey(winrt::param::hstring key) const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).HasKey(static_cast<winrt::hstring const&>(key)); }
-        auto Insert(winrt::param::hstring key, IInspectable const& value) const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Insert(static_cast<winrt::hstring const&>(key), value); }
-        auto Lookup(winrt::param::hstring key) const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Lookup(static_cast<winrt::hstring const&>(key)); }
-        auto Remove(winrt::param::hstring key) const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Remove(static_cast<winrt::hstring const&>(key)); }
+            auto First() const { return static_cast<IIterable<IKeyValuePair<winrt::hstring, IInspectable>> const&>(*this).First(); }
+            auto Size() const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Size(); }
+            auto Clear() const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Clear(); }
+            auto GetView() const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).GetView(); }
+            auto HasKey(param::hstring key) const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).HasKey(static_cast<winrt::hstring const&>(key)); }
+            auto Insert(param::hstring key, IInspectable const& value) const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Insert(static_cast<winrt::hstring const&>(key), value); }
+            auto Lookup(param::hstring key) const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Lookup(static_cast<winrt::hstring const&>(key)); }
+            auto Remove(param::hstring key) const { return static_cast<IMap<winrt::hstring, IInspectable> const&>(*this).Remove(static_cast<winrt::hstring const&>(key)); }
 
-        auto MapChanged(winrt::Windows::Foundation::Collections::MapChangedEventHandler<winrt::hstring, IInspectable> const& vhnd) const
-        {
-            return static_cast<IObservableMap<winrt::hstring, IInspectable> const&>(*this).MapChanged(vhnd);
-        }
-        void MapChanged(winrt::event_token const& token) const noexcept
-        {
-            static_cast<IObservableMap<winrt::hstring, IInspectable> const&>(*this).MapChanged(token);
-        }
-    };
-
-    // ---- InMemoryRandomAccessStream (3 secondary: IInputStream, IOutputStream, IClosable) ----
-
-    struct InMemoryRandomAccessStream : protected ThunkedRuntimeClass<IRandomAccessStream, IInputStream, IOutputStream, IClosable>
-    {
-        InMemoryRandomAccessStream()
-            : ThunkedRuntimeClass(winrt::detach_abi(winrt::Windows::Storage::Streams::InMemoryRandomAccessStream{})) {}
-        InMemoryRandomAccessStream(nullptr_t) : ThunkedRuntimeClass(nullptr) {}
-        InMemoryRandomAccessStream(InMemoryRandomAccessStream const& other) : ThunkedRuntimeClass(other) {}
-        InMemoryRandomAccessStream(InMemoryRandomAccessStream&& other) noexcept : ThunkedRuntimeClass(std::move(other)) {}
-        InMemoryRandomAccessStream& operator=(InMemoryRandomAccessStream const& other) { assign_copy(other); return *this; }
-        InMemoryRandomAccessStream& operator=(InMemoryRandomAccessStream&& other) noexcept { assign_move(std::move(other)); return *this; }
-        using ThunkedRuntimeClass::as;
-        using ThunkedRuntimeClass::try_as;
-        using ThunkedRuntimeClass::operator bool;
-
-        auto Size() const { return static_cast<IRandomAccessStream const&>(*this).Size(); }
-        void Size(uint64_t value) const { static_cast<IRandomAccessStream const&>(*this).Size(value); }
-        auto Position() const { return static_cast<IRandomAccessStream const&>(*this).Position(); }
-        void Seek(uint64_t position) const { static_cast<IRandomAccessStream const&>(*this).Seek(position); }
-        auto CanRead() const { return static_cast<IRandomAccessStream const&>(*this).CanRead(); }
-        auto CanWrite() const { return static_cast<IRandomAccessStream const&>(*this).CanWrite(); }
-        auto CloneStream() const { return static_cast<IRandomAccessStream const&>(*this).CloneStream(); }
-        auto GetInputStreamAt(uint64_t position) const { return static_cast<IRandomAccessStream const&>(*this).GetInputStreamAt(position); }
-        auto GetOutputStreamAt(uint64_t position) const { return static_cast<IRandomAccessStream const&>(*this).GetOutputStreamAt(position); }
-        void Close() const { static_cast<IClosable const&>(*this).Close(); }
-        auto FlushAsync() const { return static_cast<IOutputStream const&>(*this).FlushAsync(); }
-    };
+            auto MapChanged(winrt::Windows::Foundation::Collections::MapChangedEventHandler<winrt::hstring, winrt::Windows::Foundation::IInspectable> const& vhnd) const
+            {
+                return static_cast<winrt::Windows::Foundation::Collections::IObservableMap<winrt::hstring, winrt::Windows::Foundation::IInspectable> const&>(*this).MapChanged(vhnd);
+            }
+            void MapChanged(winrt::event_token const& token) const noexcept
+            {
+                static_cast<winrt::Windows::Foundation::Collections::IObservableMap<winrt::hstring, winrt::Windows::Foundation::IInspectable> const&>(*this).MapChanged(token);
+            }
+        };
+    }
 }

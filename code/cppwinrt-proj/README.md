@@ -16,9 +16,13 @@ Cache non-default interface pointers so the QI cost is paid once per interface, 
 | `virtual_wrapper` | C++ virtual class wrapping the cached tuple | Hides caching behind vtable, but adds shared_ptr overhead |
 | `cppwinrt_cheese` | Derive from projected type, `static_cast` to force interface | Simplest, but no caching — still QIs per call |
 | `another_attempt` | `void*` array + raw QI via IID | Compact, inlines well, but hand-rolled per type |
-| `generic_mutating` | **Thunked base class + MASM stubs** | Generic, minimal binary size, thread-safe |
+| `winrt::fast` | **Thunked base class + MASM stubs** | Generic, minimal binary size, thread-safe |
 
-## The Thunk Solution (`generic_mutating`)
+## The Thunk Solution (`winrt::fast`)
+
+The thunk infrastructure lives in `winrt::fast::impl`. Projected thunked types mirror
+the standard WinRT namespace under a `fast` sub-namespace, e.g.
+`winrt::Windows::Foundation::Collections::fast::PropertySet`.
 
 ### Architecture
 
@@ -44,14 +48,14 @@ PropertySet object layout:
 Each `InterfaceThunk` has a vtable pointer as its first field, making it look like a COM object. The vtable points into a shared table of 256 MASM-generated stubs. Each stub is 10 bytes (x64):
 
 ```asm
-generic_mutating_thunk_stub_82:
+winrt_fast_thunk_stub_82:
     mov     eax, 52h                ; slot index
     jmp     common_thunk_dispatch   ; shared dispatch
 ```
 
 `common_thunk_dispatch` (60 bytes, shared across all stubs):
 1. Saves caller's `rdx`/`r8`/`r9` in shadow space
-2. Calls `resolve()` with `rcx` = `InterfaceThunk*`
+2. Calls `winrt_fast_resolve_thunk()` with `rcx` = `InterfaceThunk*`
 3. `resolve()` atomically replaces `*cache_slot` with the real interface via `compare_exchange_strong`
 4. Loads `real_vtable[slot_index]` and tail-jumps to the real method
 
@@ -75,22 +79,28 @@ This is shared across *all* thunked runtimeclasses. Adding a new type costs zero
 
 ### Base Class
 
-`ThunkedRuntimeClass<N>` is templated on the number of secondary interfaces. It owns the cache array, thunk objects, and provides copy/move/destroy semantics. Derived types just `= default` all special members:
+`ThunkedRuntimeClass<IDefault, I...>` is templated on the default and secondary interfaces.
+It owns the cache array, thunk objects, and provides copy/move/destroy semantics.
+Derived types alias the base and forward constructors:
 
 ```cpp
-struct PropertySet : protected ThunkedRuntimeClass<3>
+namespace winrt::Windows::Foundation::Collections::fast
 {
-    static constexpr GUID const* iids[] = { &iid_map, &iid_iterable, &iid_observable };
-
-    PropertySet() : ThunkedRuntimeClass(winrt::detach_abi(...), iids) {}
-    PropertySet(PropertySet const&) = default;
-    PropertySet(PropertySet&&) noexcept = default;
-    PropertySet& operator=(PropertySet const&) = default;
-    PropertySet& operator=(PropertySet&&) noexcept = default;
-};
+    struct PropertySet : protected winrt::fast::impl::ThunkedRuntimeClass<
+        IPropertySet,
+        IMap<hstring, IInspectable>,
+        IIterable<IKeyValuePair<hstring, IInspectable>>,
+        IObservableMap<hstring, IInspectable>>
+    {
+        using base_t = winrt::fast::impl::ThunkedRuntimeClass<...>;
+        PropertySet() : PropertySet(winrt::detach_abi(...), winrt::take_ownership_from_abi) {}
+        PropertySet(nullptr_t) : base_t(nullptr) {}
+        PropertySet(void* p, take_ownership_from_abi_t) : base_t(p) {}
+        PropertySet(PropertySet const&) = default;
+        // ...
+    };
+}
 ```
-
-A `ThunkedRuntimeClass<0>` specialization exists for types with only a default interface (just a ref-counted pointer, no thunks).
 
 ## Codegen Comparison
 
@@ -138,41 +148,38 @@ The thunked version eliminates the per-call QI+Release entirely. The first call 
 
 | File | Purpose |
 |------|---------|
-| `experiment.cpp` | All caching approaches + `ThunkedRuntimeClass<N>` implementation |
-| `thunk_stubs.asm` | x64 MASM stubs + vtable array |
-| `thunk_stubs_x86.asm` | x86 MASM stubs (stdcall-compatible, 4-byte vtable slots) |
-| `thunk_stubs_arm64.asm` | ARM64 armasm64 stubs (DCD-encoded `movz` to work around armasm64 numeric formatting) |
-| `thunk_stubs_arm64ec.asm` | ARM64EC stubs (identical logic to ARM64) |
-| `thunk_tests.cpp` | 24 tests: correctness, lifecycle, pass-by-ref/value, 8-thread concurrent resolve |
+| `experiment.cpp` | Main entry point + side-by-side comparison functions |
+| `thunk_experiment.h` | `winrt::fast::impl` thunk infrastructure + `winrt::...::fast::PropertySet` |
+| `self_replacing.cpp` | Sketch of alternative self-replacing trampoline design (`#if 0`) |
+| `cached_types.cpp` | Additional cached type experiments |
+| `cppwinrt_replicant.cpp` | Replicant projection experiments |
 | `shared.h` | Common type aliases and `comparison<T>()` template |
+| `thunk_stubs.asm` | x64 MASM stubs + vtable array (`winrt_fast_thunk_stub_*`) |
+| `thunk_stubs_x86.asm` | x86 MASM stubs (stdcall-compatible, 4-byte vtable slots) |
+| `thunk_stubs_arm64.asm` | ARM64 armasm64 stubs |
+| `thunk_stubs_arm64ec.asm` | ARM64EC stubs (identical logic to ARM64) |
+| `thunk_tests.cpp` | Correctness, lifecycle, pass-by-ref/value, 8-thread concurrent resolve |
 
 ## Building
 
 ```powershell
 # x64
 cmake --preset vsbuild
-cmake --build --preset vsbuild-release --target cppwinrt-proj thunk-tests
-
-# x86
-cmake --preset vsbuild-x86
-cmake --build --preset vsbuild-x86-debug --target thunk-tests
-
-# ARM64 (cross-compile)
-cmake --preset vsbuild-arm64
-cmake --build --preset vsbuild-arm64-debug --target cppwinrt-proj
+cmake --build --preset vsbuild-release --target cppwinrt-proj
 ```
 
 ## Testing
 
 ```powershell
-# Run tests
-.\out\build\vsbuild\code\cppwinrt-proj\RelWithDebInfo\thunk-tests.exe
+# Run via ctest
+ctest --test-dir out/build/vsbuild
+
+# Or run directly
+.\out\build\vsbuild\code\cppwinrt-proj\RelWithDebInfo\cppwinrt-proj.exe
 
 # Run under debugger (catch AVs)
-c:\debuggers\cdb.exe -g -G -c "sxe av ; g ; q" .\out\build\vsbuild\code\cppwinrt-proj\RelWithDebInfo\thunk-tests.exe
+c:\debuggers\cdb.exe -g -G -c "sxe av ; g ; q" .\out\build\vsbuild\code\cppwinrt-proj\RelWithDebInfo\cppwinrt-proj.exe
 ```
-
-Both x64 and x86: 24 tests, 61 assertions, 0 failures, clean under debugger.
 
 ## Compatibility: Breaking the Single-Pointer Assumption
 
@@ -189,13 +196,13 @@ The thunked `PropertySet` breaks all of this. It's ~128 bytes (cache array + thu
 
 If this technique were adopted into cppwinrt's code generator:
 
-1. **Keep the single-pointer projected type unchanged.** `PropertySet` remains `sizeof(void*)` and satisfies all existing ABI contracts. The thunked cache lives in a *separate* opt-in wrapper type, e.g. `winrt::cached<PropertySet>`.
+1. **Keep the single-pointer projected type unchanged.** `PropertySet` remains `sizeof(void*)` and satisfies all existing ABI contracts. The thunked cache lives in a *separate* opt-in wrapper type under a `fast` sub-namespace (e.g. `winrt::Windows::Foundation::Collections::fast::PropertySet`).
 
-2. **`winrt::cached<T>` as a smart wrapper.** Contains a `ThunkedRuntimeClass<N>` where N is computed from the metadata's interface list. Provides all the same methods as `T`. Implicit conversion to `T` (extracts default interface, AddRefs). This preserves API compatibility — anything that takes `PropertySet` by value/ref still works.
+2. **`winrt::...::fast::PropertySet` as the thunked wrapper.** Contains a `ThunkedRuntimeClass<IDefault, I...>` where the interface list is computed from the metadata. Provides all the same methods as the standard projected type. Implicit conversion to the standard projected type (extracts default interface, AddRefs). This preserves API compatibility — anything that takes `PropertySet` by value/ref still works.
 
-3. **`get_abi` / `detach_abi` support.** `winrt::cached<T>` could expose `get_abi()` returning `cache[0]` (the default interface). `detach_abi()` would detach the default and clear the cache. This maps cleanly to the existing ABI contract.
+3. **`get_abi` / `detach_abi` support.** The thunked type exposes `get_abi()` returning the default interface pointer. `detach_abi()` detaches the default and clears the cache. This maps cleanly to the existing ABI contract.
 
-4. **Opt-in per type at point of use.** No metadata or projection changes needed. A developer writes `winrt::cached<PropertySet> ps;` instead of `PropertySet ps;` when they want caching. The projected `PropertySet` type is unchanged.
+4. **Opt-in per type at point of use.** No metadata or projection changes needed. A developer writes `fast::PropertySet ps;` instead of `PropertySet ps;` when they want caching. The projected `PropertySet` type is unchanged.
 
 5. **Code generator could emit the IID table and method forwarding.** The `iids[]` array, slot indices, and typed accessor methods (`map_iface()`, etc.) are all derivable from the `.winmd` metadata. The thunk stubs and `ThunkedRuntimeClass<N>` base are shared infrastructure — they don't change per type.
 

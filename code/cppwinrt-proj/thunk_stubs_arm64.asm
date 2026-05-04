@@ -7,7 +7,7 @@
 ; The common dispatch saves x1-x7 and lr, calls resolve(x0), then
 ; restores args and tail-branches to the real vtable slot.
 
-    IMPORT generic_mutating_resolve_thunk
+    IMPORT winrt_fast_resolve_thunk
 
     AREA |.text|, CODE, READONLY, ALIGN=4
 
@@ -25,7 +25,7 @@ common_thunk_dispatch PROC
     stp     x7, x10, [sp, #64]
 
     ; x0 = InterfaceThunk*
-    bl      generic_mutating_resolve_thunk
+    bl      winrt_fast_resolve_thunk
 
     ldp     x7, x10, [sp, #64]
     ldp     x5, x6, [sp, #48]
@@ -44,8 +44,8 @@ common_thunk_dispatch PROC
 ; All stubs are 8 bytes (2 x 4-byte instructions), tightly packed.
 ; ============================================================================
     ALIGN 8
-    EXPORT generic_mutating_thunk_stub_base
-generic_mutating_thunk_stub_base
+    EXPORT winrt::fast_thunk_stub_base
+winrt::fast_thunk_stub_base
 
     ; Macro emits one stub: adr x10 to self, sub from base, lsr by 3, branch
     ; Actually each stub needs to be exactly 8 bytes = 2 instructions.
@@ -58,8 +58,8 @@ generic_mutating_thunk_stub_base
 
     MACRO
     ThunkStubDCD $idx
-    EXPORT generic_mutating_thunk_stub_$idx
-generic_mutating_thunk_stub_$idx
+    EXPORT winrt::fast_thunk_stub_$idx
+winrt::fast_thunk_stub_$idx
     DCD CurEnc
     b       common_thunk_dispatch
     MEND
@@ -78,12 +78,12 @@ StubCtr SETA StubCtr + 1
 ; ============================================================================
     AREA |.data|, DATA, READWRITE, ALIGN=3
 
-    EXPORT generic_mutating_thunk_vtable
-generic_mutating_thunk_vtable
+    EXPORT winrt::fast_thunk_vtable
+winrt::fast_thunk_vtable
 
     MACRO
     VtableEntry $idx
-    DCQ generic_mutating_thunk_stub_$idx
+    DCQ winrt::fast_thunk_stub_$idx
     MEND
 
     GBLA VtblCtr
