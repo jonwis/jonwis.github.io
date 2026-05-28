@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <noInherit />
+
+  <assemblyIdentity
+    type="win32"
+    name="static-loading.testing"
+    version="1.0.0.0"
+    processorArchitecture="amd64" />
+
+  <description>Static import sample with panmap as loose DLL and batmeter in private assembly core</description>
+
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="panmap"
+        version="1.0.0.0"
+        processorArchitecture="amd64" />
+    </dependentAssembly>
+  </dependency>
+
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="core"
+        version="1.0.0.0"
+        processorArchitecture="amd64" />
+    </dependentAssembly>
+  </dependency>
+</assembly>
